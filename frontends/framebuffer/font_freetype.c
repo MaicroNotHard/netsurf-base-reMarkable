@@ -67,6 +67,7 @@ enum fb_face_e {
 	FB_FACE_MONOSPACE_BOLD,
 	FB_FACE_CURSIVE,
 	FB_FACE_FANTASY,
+	FB_FACE_CJK,
 	FB_FACE_COUNT
 };
 
@@ -302,7 +303,13 @@ bool fb_font_init(void)
 		fb_faces[FB_FACE_FANTASY] = fb_face;
 	}
 
-        
+	/* Optional CJK fallback face; left NULL (fallback disabled) when
+	 * unavailable, rather than aliased to sans serif which has no CJK. */
+	fb_faces[FB_FACE_CJK] = fb_new_face(nsoption_charp(fb_face_cjk),
+					    "cjk.ttf",
+					    NETSURF_FB_FONT_CJK);
+
+
         /* set the default render mode */
         if (nsoption_bool(fb_font_monochrome) == true)
                 ft_load_type = FT_LOAD_MONOCHROME; /* faster but less pretty */
@@ -414,7 +421,18 @@ FT_Glyph fb_getglyph(const plot_font_style_t *fstyle, uint32_t ucs4)
         glyph_index = FTC_CMapCache_Lookup(ft_cmap_cache, srec.face_id,
 			fb_face->cidx, ucs4);
 
-        error = FTC_ImageCache_LookupScaler(ft_image_cache, 
+        /* Glyph missing from the selected face: retry via the CJK fallback
+         * face, re-pointing the scaler so the image lookup below uses it. */
+        if (glyph_index == 0 &&
+            fb_faces[FB_FACE_CJK] != NULL &&
+            srec.face_id != (FTC_FaceID)fb_faces[FB_FACE_CJK]) {
+                fb_face = fb_faces[FB_FACE_CJK];
+                srec.face_id = (FTC_FaceID)fb_face;
+                glyph_index = FTC_CMapCache_Lookup(ft_cmap_cache, srec.face_id,
+                                fb_face->cidx, ucs4);
+        }
+
+        error = FTC_ImageCache_LookupScaler(ft_image_cache,
                                             &srec, 
                                             FT_LOAD_RENDER | 
                                             FT_LOAD_FORCE_AUTOHINT | 

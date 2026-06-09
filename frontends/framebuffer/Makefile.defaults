@@ -36,6 +36,7 @@ NETSURF_FB_FONT_MONOSPACE := DejaVuSansMono.ttf
 NETSURF_FB_FONT_MONOSPACE_BOLD := DejaVuSansMono-Bold.ttf
 NETSURF_FB_FONT_CURSIVE := Comic_Sans_MS.ttf
 NETSURF_FB_FONT_FANTASY := Impact.ttf
+NETSURF_FB_FONT_CJK := NotoSansCJKsc-Regular.otf
 
 # Default binary install path
 NETSURF_FRAMEBUFFER_BIN := $(PREFIX)/bin

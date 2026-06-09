@@ -62,6 +62,8 @@ NSOPTION_STRING(fb_face_monospace, NULL)
 NSOPTION_STRING(fb_face_monospace_bold, NULL)
 NSOPTION_STRING(fb_face_cursive, NULL)
 NSOPTION_STRING(fb_face_fantasy, NULL)
+/* Fallback face for glyphs (e.g. CJK) missing from the selected face. */
+NSOPTION_STRING(fb_face_cjk, NULL)
 
 NSOPTION_STRING(fb_download_directory, NULL)
 NSOPTION_STRING(fb_xochitl_restart_command, "systemctl reboot")
