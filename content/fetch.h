@@ -28,6 +28,8 @@
 #include "utils/config.h"
 #include "utils/nsurl.h"
 #include "utils/inet.h"
+#include "utils/http/response-codes.h"
+
 #include "netsurf/ssl_certs.h"
 
 struct content;
@@ -94,6 +96,16 @@ typedef struct fetch_msg {
 } fetch_msg;
 
 /**
+ * Fetcher post data types
+ */
+typedef enum {
+	FETCH_POSTDATA_NONE,
+	FETCH_POSTDATA_URLENC,
+	FETCH_POSTDATA_MULTIPART,
+} fetch_postdata_type;
+
+
+/**
  * Fetch POST multipart data
  */
 struct fetch_multipart_data {
@@ -105,6 +117,20 @@ struct fetch_multipart_data {
 	char *rawfile; /**< Raw filename if file is true */
 	bool file; /**< Item is a file */
 };
+
+/**
+ * fetch POST data
+ */
+struct fetch_postdata {
+	fetch_postdata_type type;
+	union {
+		/** Url encoded POST string if type is FETCH_POSTDATA_URLENC */
+		char *urlenc;
+		/** Multipart post data if type is FETCH_POSTDATA_MULTIPART */
+		struct fetch_multipart_data *multipart;
+	} data;
+};
+
 
 typedef void (*fetch_callback)(const fetch_msg *msg, void *p);
 
@@ -167,7 +193,7 @@ void fetch_change_callback(struct fetch *fetch, fetch_callback callback, void *p
 /**
  * Get the HTTP response code.
  */
-long fetch_http_code(struct fetch *fetch);
+http_response_code fetch_http_code(struct fetch *fetch);
 
 
 /**
@@ -227,7 +253,7 @@ void fetch_free(struct fetch *f);
 /**
  * set the http code of a fetch
  */
-void fetch_set_http_code(struct fetch *fetch, long http_code);
+nserror fetch_set_http_code(struct fetch *fetch, http_response_code http_code);
 
 /**
  * set cookie data on a fetch

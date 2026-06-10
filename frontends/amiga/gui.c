@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2020 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2008-2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -161,6 +161,7 @@
 #include "amiga/selectmenu.h"
 #include "amiga/theme.h"
 #include "amiga/utf8.h"
+#include "amiga/corewindow.h"
 
 #define AMINS_SCROLLERPEN NUMDRIPENS
 #define NSA_KBD_SCROLL_PX 10
@@ -224,8 +225,7 @@ enum
 	GID_FAVE_RMV,
 	GID_CLOSETAB,
 	GID_CLOSETAB_BM,
-	GID_ADDTAB,
-	GID_ADDTAB_BM,
+	GID_ADDTAB_HINT,
 	GID_TABS,
 	GID_TABS_FLAG,
 	GID_SEARCHSTRING,
@@ -253,6 +253,7 @@ struct gui_window_2 {
 	ULONG tabs;
 	ULONG next_tab;
 	struct Node *last_new_tab;
+	struct Node *new_tab_tab;
 	struct Hook scrollerhook;
 	browser_mouse_state mouse_state;
 	browser_mouse_state key_state;
@@ -272,6 +273,7 @@ struct gui_window_2 {
 	char *restrict svbuffer;
 	char *restrict status;
 	char *restrict wintitle;
+	char icontitle[24];
 	char *restrict helphints[GID_LAST];
 	browser_mouse_state prev_mouse_state;
 	struct timeval lastclick;
@@ -358,7 +360,6 @@ static char *current_user_faviconcache;
 static const __attribute__((used)) char *stack_cookie = "\0$STACK:196608\0";
 
 const char * const versvn;
-const char * const verdate;
 
 static void ami_switch_tab(struct gui_window_2 *gwin, bool redraw);
 static void ami_change_tab(struct gui_window_2 *gwin, int direction);
@@ -927,48 +928,91 @@ static UWORD ami_system_colour_scrollbar_fgpen(struct DrawInfo *drinfo)
 
 }
 
+#ifdef __amigaos4__
+
 /**
- * set option from pen
+ * convert an amiga pen to a netsurf colour
  */
-static nserror
-colour_option_from_pen(UWORD pen,
-			   enum nsoption_e option,
-			   struct Screen *screen,
-			   colour def_colour)
+static colour
+nscolour_from_pen(struct Screen *screen, UWORD pen, colour sel_colour)
 {
 	ULONG colr[3];
 	struct DrawInfo *drinfo;
 
-	if((option < NSOPTION_SYS_COLOUR_START) ||
-	   (option > NSOPTION_SYS_COLOUR_END) ||
-	   (nsoptions[option].type != OPTION_COLOUR)) {
-		return NSERROR_BAD_PARAMETER;
-	}
+	drinfo = GetScreenDrawInfo(screen);
 
-	if(screen != NULL) {
-		drinfo = GetScreenDrawInfo(screen);
-		if(drinfo != NULL) {
-
-			if(pen == AMINS_SCROLLERPEN) pen = ami_system_colour_scrollbar_fgpen(drinfo);
-
-			/* Get the colour of the pen being used for "pen" */
-			GetRGB32(screen->ViewPort.ColorMap, drinfo->dri_Pens[pen], 1, (ULONG *)&colr);
-
-			/* convert it to a color */
-			def_colour = ((colr[0] & 0xff000000) >> 24) |
-				((colr[1] & 0xff000000) >> 16) |
-				((colr[2] & 0xff000000) >> 8);
-
-			FreeScreenDrawInfo(screen, drinfo);
+	if (drinfo != NULL) {
+		if (pen == AMINS_SCROLLERPEN) {
+			pen = ami_system_colour_scrollbar_fgpen(drinfo);
 		}
-	}
 
-	if (nsoptions_default[option].value.c == nsoptions[option].value.c)
-		nsoptions[option].value.c = def_colour;
-	nsoptions_default[option].value.c = def_colour;
+		/* Get the colour of the pen being used for "pen" */
+		GetRGB32(screen->ViewPort.ColorMap,
+			 drinfo->dri_Pens[pen],
+			 1,
+			 (ULONG *)&colr);
+
+		/* convert it to a color */
+		sel_colour = ((colr[0] & 0xff000000) >> 24) |
+			((colr[1] & 0xff000000) >> 16) |
+			((colr[2] & 0xff000000) >> 8);
+
+		FreeScreenDrawInfo(screen, drinfo);
+	}
+	return sel_colour;
+}
+
+
+/**
+ * set system colour options from amiga pen
+ */
+static nserror system_colours_from_pen(struct Screen *screen)
+{
+        #define MAP_SIZE (19)
+	int mapidx;
+	colour sel_colour;
+	struct pcm {
+		enum nsoption_e option;
+		UWORD pen;
+		colour def_colour;
+	};
+	struct pcm pen_colour_map[MAP_SIZE] = {
+		{NSOPTION_sys_colour_AccentColor, FILLPEN, 0x00000000},
+		{NSOPTION_sys_colour_AccentColorText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_ActiveText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_ButtonBorder, FILLPEN, 0x00000000},
+		{NSOPTION_sys_colour_ButtonFace, FOREGROUNDPEN, 0x00aaaaaa},
+		{NSOPTION_sys_colour_ButtonText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_Canvas, BACKGROUNDPEN, 0x00aaaaaa},
+		{NSOPTION_sys_colour_CanvasText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_Field, BACKGROUNDPEN, 0x00aaaaaa},
+		{NSOPTION_sys_colour_FieldText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_GrayText, DISABLEDTEXTPEN, 0x00777777},
+		{NSOPTION_sys_colour_Highlight, SELECTPEN, 0x00ee0000},
+		{NSOPTION_sys_colour_HighlightText, SELECTTEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_LinkText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_Mark, FILLPEN, 0x00000000},
+		{NSOPTION_sys_colour_MarkText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_SelectedItem, FILLPEN, 0x00000000},
+		{NSOPTION_sys_colour_SelectedItemText, TEXTPEN, 0x00000000},
+		{NSOPTION_sys_colour_VisitedText, TEXTPEN, 0x00000000},
+	};
+	struct pcm *entry;
+
+	for (mapidx=0; mapidx < MAP_SIZE; mapidx++) {
+		entry = &pen_colour_map[mapidx];
+		sel_colour = nscolour_from_pen(screen, entry->pen, entry->def_colour);
+
+		if (nsoptions_default[entry->option].value.c == nsoptions[entry->option].value.c) {
+			nsoptions[entry->option].value.c = sel_colour;
+		}
+		nsoptions_default[entry->option].value.c = sel_colour;
+	}
 
 	return NSERROR_OK;
 }
+
+#endif /* __amigaos4__ */
 
 /* exported interface documented in amiga/gui.h */
 STRPTR ami_gui_get_screen_title(void)
@@ -984,69 +1028,12 @@ STRPTR ami_gui_get_screen_title(void)
 
 static void ami_set_screen_defaults(struct Screen *screen)
 {
-	/* various window size/position defaults */
-	int width = screen->Width / 2;
-	int height = screen->Height / 2;
-	int top = (screen->Height / 2) - (height / 2);
-	int left = (screen->Width / 2) - (width / 2);
-
-	nsoption_default_set_int(cookies_window_ypos, top);
-	nsoption_default_set_int(cookies_window_xpos, left);
-	nsoption_default_set_int(cookies_window_xsize, width);
-	nsoption_default_set_int(cookies_window_ysize, height);
-
-	nsoption_default_set_int(history_window_ypos, top);
-	nsoption_default_set_int(history_window_xpos, left);
-	nsoption_default_set_int(history_window_xsize, width);
-	nsoption_default_set_int(history_window_ysize, height);
-
-	nsoption_default_set_int(hotlist_window_ypos, top);
-	nsoption_default_set_int(hotlist_window_xpos, left);
-	nsoption_default_set_int(hotlist_window_xsize, width);
-	nsoption_default_set_int(hotlist_window_ysize, height);
-
-
-	nsoption_default_set_int(window_x, 0);
-	nsoption_default_set_int(window_y, screen->BarHeight + 1);
-	nsoption_default_set_int(window_width, screen->Width);
-	nsoption_default_set_int(window_height, screen->Height - screen->BarHeight - 1);
-
-#ifdef __amigaos4__
 	nsoption_default_set_int(redraw_tile_size_x, screen->Width);
 	nsoption_default_set_int(redraw_tile_size_y, screen->Height);
 
+#ifdef __amigaos4__
 	/* set system colours for amiga ui */
-	colour_option_from_pen(FILLPEN, NSOPTION_sys_colour_ActiveBorder, screen, 0x00000000);
-	colour_option_from_pen(FILLPEN, NSOPTION_sys_colour_ActiveCaption, screen, 0x00dddddd);
-	colour_option_from_pen(BACKGROUNDPEN, NSOPTION_sys_colour_AppWorkspace, screen, 0x00eeeeee);
-	colour_option_from_pen(BACKGROUNDPEN, NSOPTION_sys_colour_Background, screen, 0x00aa0000);
-	colour_option_from_pen(FOREGROUNDPEN, NSOPTION_sys_colour_ButtonFace, screen, 0x00aaaaaa);
-	colour_option_from_pen(FORESHINEPEN, NSOPTION_sys_colour_ButtonHighlight, screen, 0x00cccccc);
-	colour_option_from_pen(FORESHADOWPEN, NSOPTION_sys_colour_ButtonShadow, screen, 0x00bbbbbb);
-	colour_option_from_pen(TEXTPEN, NSOPTION_sys_colour_ButtonText, screen, 0x00000000);
-	colour_option_from_pen(FILLTEXTPEN, NSOPTION_sys_colour_CaptionText, screen, 0x00000000);
-	colour_option_from_pen(DISABLEDTEXTPEN, NSOPTION_sys_colour_GrayText, screen, 0x00777777);
-	colour_option_from_pen(SELECTPEN, NSOPTION_sys_colour_Highlight, screen, 0x00ee0000);
-	colour_option_from_pen(SELECTTEXTPEN, NSOPTION_sys_colour_HighlightText, screen, 0x00000000);
-	colour_option_from_pen(INACTIVEFILLPEN, NSOPTION_sys_colour_InactiveBorder, screen, 0x00000000);
-	colour_option_from_pen(INACTIVEFILLPEN, NSOPTION_sys_colour_InactiveCaption, screen, 0x00ffffff);
-	colour_option_from_pen(INACTIVEFILLTEXTPEN, NSOPTION_sys_colour_InactiveCaptionText, screen, 0x00cccccc);
-	colour_option_from_pen(BACKGROUNDPEN, NSOPTION_sys_colour_InfoBackground, screen, 0x00aaaaaa);/* This is wrong, HelpHint backgrounds are pale yellow but doesn't seem to be a DrawInfo pen defined for it. */
-	colour_option_from_pen(TEXTPEN, NSOPTION_sys_colour_InfoText, screen, 0x00000000);
-	colour_option_from_pen(MENUBACKGROUNDPEN, NSOPTION_sys_colour_Menu, screen, 0x00aaaaaa);
-	colour_option_from_pen(MENUTEXTPEN, NSOPTION_sys_colour_MenuText, screen, 0x00000000);
-	colour_option_from_pen(AMINS_SCROLLERPEN, NSOPTION_sys_colour_Scrollbar, screen, 0x00aaaaaa);
-	colour_option_from_pen(FORESHADOWPEN, NSOPTION_sys_colour_ThreeDDarkShadow, screen, 0x00555555);
-	colour_option_from_pen(FOREGROUNDPEN, NSOPTION_sys_colour_ThreeDFace, screen, 0x00dddddd);
-	colour_option_from_pen(FORESHINEPEN, NSOPTION_sys_colour_ThreeDHighlight, screen, 0x00aaaaaa);
-	colour_option_from_pen(HALFSHINEPEN, NSOPTION_sys_colour_ThreeDLightShadow, screen, 0x00999999);
-	colour_option_from_pen(HALFSHADOWPEN, NSOPTION_sys_colour_ThreeDShadow, screen, 0x00777777);
-	colour_option_from_pen(BACKGROUNDPEN, NSOPTION_sys_colour_Window, screen, 0x00aaaaaa);
-	colour_option_from_pen(INACTIVEFILLPEN, NSOPTION_sys_colour_WindowFrame, screen, 0x00000000);
-	colour_option_from_pen(TEXTPEN, NSOPTION_sys_colour_WindowText, screen, 0x00000000);
-#else
-	nsoption_default_set_int(redraw_tile_size_x, 100);
-	nsoption_default_set_int(redraw_tile_size_y, 100);
+	system_colours_from_pen(screen);
 #endif
 }
 
@@ -1123,31 +1110,7 @@ static nserror ami_set_options(struct nsoption_s *defaults)
 	nsoption_setnull_charp(ca_bundle,
 			       (char *)strdup("PROGDIR:Resources/ca-bundle"));
 
-	/* font defaults */
-#ifdef __amigaos4__
-	nsoption_setnull_charp(font_sans, (char *)strdup("DejaVu Sans"));
-	nsoption_setnull_charp(font_serif, (char *)strdup("DejaVu Serif"));
-	nsoption_setnull_charp(font_mono, (char *)strdup("DejaVu Sans Mono"));
-	nsoption_setnull_charp(font_cursive, (char *)strdup("DejaVu Sans"));
-	nsoption_setnull_charp(font_fantasy, (char *)strdup("DejaVu Serif"));
-#else
-	nsoption_setnull_charp(font_sans, (char *)strdup("helvetica"));
-	nsoption_setnull_charp(font_serif, (char *)strdup("times"));
-	nsoption_setnull_charp(font_mono, (char *)strdup("topaz"));
-	nsoption_setnull_charp(font_cursive, (char *)strdup("garnet"));
-	nsoption_setnull_charp(font_fantasy, (char *)strdup("emerald"));
-/* Default CG fonts for OS3 - these work with use_diskfont both on and off,
-	however they are slow in both cases. The bitmap fonts don't work when
-	use_diskfont is off. The bitmap fonts performance on 68k is far superior,
-	so default to those for now whilst testing.
-	\todo maybe add some buttons to the prefs GUI to toggle?
-	nsoption_setnull_charp(font_sans, (char *)strdup("CGTriumvirate"));
-	nsoption_setnull_charp(font_serif, (char *)strdup("CGTimes"));
-	nsoption_setnull_charp(font_mono, (char *)strdup("LetterGothic"));
-	nsoption_setnull_charp(font_cursive, (char *)strdup("CGTriumvirate"));
-	nsoption_setnull_charp(font_fantasy, (char *)strdup("CGTimes"));
-*/
-#endif
+	/* Regular font defaults are set in font.c */
 
 	if (nsoption_charp(font_unicode) == NULL)
 	{
@@ -1325,7 +1288,7 @@ static void ami_openscreenfirst(void)
 	ami_theme_throbber_setup();
 }
 
-static struct RDArgs *ami_gui_commandline(int *restrict argc, char ** argv,
+static char **ami_gui_commandline(int *restrict argc, char ** argv,
 		int *restrict nargc, char ** nargv)
 {
 	struct RDArgs *args;
@@ -1373,10 +1336,48 @@ static struct RDArgs *ami_gui_commandline(int *restrict argc, char ** argv,
 		 * first, nsoption_commandline() can no longer parse (fetch?)
 		 * the arguments.  If nsoption_commandline() is called first,
 		 * then ReadArgs cannot fetch the arguments.
-		 *\todo this was totally broken so to stop startup crashing
-		 * has been temporarily removed (core cli not called when func
-		 * returns NULL).
 		 */
+			char **nsopts = (char **)rarray[A_NSOPTS];
+			int i = 0;
+			int opts = 0;
+
+			/* Count the number of args */
+			do {
+				NSLOG(netsurf, INFO,
+			      "NSOPTS/M %d = %s", opts, nsopts[i]);
+				opts++;
+				i++;
+			} while(nsopts[i]);
+			
+			opts = i + 1;
+			NSLOG(netsurf, INFO, "Core option count: %d (+1 for command)", opts);
+			
+			/* Allocate a new array and copy to it */
+			char **fakeargs = malloc((opts + 1) * sizeof(char *));
+			if(fakeargs == NULL) {
+				NSLOG(netsurf, WARNING, "Unable to allocate memory fir fake args array");
+				return NULL;
+			}
+
+			/* Arg 0 is the command itself */
+			fakeargs[0] = strdup("NetSurf");
+
+			i = 0;
+
+			do {
+				fakeargs[i+1] = strdup(nsopts[i]);
+				NSLOG(netsurf, INFO,
+					"OPT %d: %s", i+1, fakeargs[i+1]);
+				i++;
+			} while(nsopts[i]);
+			
+			fakeargs[i+1] = NULL;
+
+			*nargc = opts;
+			*nargv = fakeargs;
+			
+			FreeArgs(args);
+			return fakeargs;
 		}
 	} else {
 		NSLOG(netsurf, INFO, "ReadArgs failed to parse command line");
@@ -1455,7 +1456,7 @@ static void gui_init2(int argc, char** argv)
 
 	hotlist_init(nsoption_charp(hotlist_file),
 			nsoption_charp(hotlist_file));
-	search_web_select_provider(nsoption_int(search_provider));
+	search_web_select_provider(nsoption_charp(search_web_provider));
 
 	if (notalreadyrunning && 
 	    (nsoption_bool(startup_no_window) == false))
@@ -1856,28 +1857,33 @@ static void ami_update_quals(struct gui_window_2 *gwin)
 /* exported interface documented in amiga/gui.h */
 nserror ami_gui_get_space_box(Object *obj, struct IBox **bbox)
 {
+	struct IBox *ib = AllocVec(sizeof(struct IBox), MEMF_PRIVATE);
+	if(ib == NULL) return NSERROR_NOMEM;
 #ifdef __amigaos4__
 	if(LIB_IS_AT_LEAST((struct Library *)SpaceBase, 53, 6)) {
-		*bbox = malloc(sizeof(struct IBox));
-		if(*bbox == NULL) return NSERROR_NOMEM;
-		GetAttr(SPACE_RenderBox, obj, (ULONG *)*bbox);
+		GetAttr(SPACE_RenderBox, obj, (ULONG *)ib);
 	} else
 #endif
 	{
-		GetAttr(SPACE_AreaBox, obj, (ULONG *)bbox);
+		struct IBox *t_ib;
+		GetAttr(SPACE_AreaBox, obj, (ULONG *)&t_ib);
+		if(t_ib == NULL) {
+			FreeVec(ib);
+			return NSERROR_NOMEM;
+		} else {
+			/* Create a copy so this works the same as the newer SPACE_RenderBox */
+			CopyMem(t_ib, ib, sizeof(struct IBox));
+		}
 	}
 
+	*bbox = ib;
 	return NSERROR_OK;
 }
 
 /* exported interface documented in amiga/gui.h */
 void ami_gui_free_space_box(struct IBox *bbox)
 {
-#ifdef __amigaos4__
-	if(LIB_IS_AT_LEAST((struct Library *)SpaceBase, 53, 6)) {
-		free(bbox);
-	}
-#endif
+	if(bbox != NULL) FreeVec(bbox);
 }
 
 static bool ami_spacebox_to_ns_coords(struct gui_window_2 *gwin,
@@ -1908,8 +1914,10 @@ bool ami_mouse_to_ns_coords(struct gui_window_2 *gwin, int *restrict x, int *res
 		ns_x = (ULONG)(mouse_x - bbox->Left);
 		ns_y = (ULONG)(mouse_y - bbox->Top);
 
-		if((ns_x < 0) || (ns_x > bbox->Width) || (ns_y < 0) || (ns_y > bbox->Height))
+		if((ns_x < 0) || (ns_x > bbox->Width) || (ns_y < 0) || (ns_y > bbox->Height)) {
+			ami_gui_free_space_box(bbox);
 			return false;
+		}
 
 		ami_gui_free_space_box(bbox);
 	} else {
@@ -2129,7 +2137,8 @@ static bool ami_gui_hscroll_add(struct gui_window_2 *gwin)
 	IDoMethod(gwin->objects[GID_HSCROLLLAYOUT], LM_ADDCHILD,
 			gwin->win, gwin->objects[GID_HSCROLL], attrs);
 #else
-	SetAttrs(gwin->objects[GID_HSCROLLLAYOUT],
+	SetGadgetAttrs((struct Gadget *)gwin->objects[GID_HSCROLLLAYOUT],
+			gwin->win, NULL,
 			LAYOUT_AddChild, gwin->objects[GID_HSCROLL], TAG_MORE, &attrs);
 #endif
 	return true;
@@ -2144,7 +2153,9 @@ static bool ami_gui_hscroll_remove(struct gui_window_2 *gwin)
 	IDoMethod(gwin->objects[GID_HSCROLLLAYOUT], LM_REMOVECHILD,
 			gwin->win, gwin->objects[GID_HSCROLL]);
 #else
-	SetAttrs(gwin->objects[GID_HSCROLLLAYOUT], LAYOUT_RemoveChild, gwin->objects[GID_HSCROLL], TAG_DONE);
+	SetGadgetAttrs((struct Gadget *)gwin->objects[GID_HSCROLLLAYOUT],
+			gwin->win, NULL,
+			LAYOUT_RemoveChild, gwin->objects[GID_HSCROLL], TAG_DONE);
 #endif
 
 	gwin->objects[GID_HSCROLL] = NULL;
@@ -2174,7 +2185,8 @@ static bool ami_gui_vscroll_add(struct gui_window_2 *gwin)
 	IDoMethod(gwin->objects[GID_VSCROLLLAYOUT], LM_ADDCHILD,
 			gwin->win, gwin->objects[GID_VSCROLL], attrs);
 #else
-	SetAttrs(gwin->objects[GID_VSCROLLLAYOUT],
+	SetGadgetAttrs((struct Gadget *)gwin->objects[GID_VSCROLLLAYOUT],
+			gwin->win, NULL,
 			LAYOUT_AddChild, gwin->objects[GID_VSCROLL], TAG_MORE, &attrs);
 #endif
 	return true;
@@ -2189,7 +2201,9 @@ static bool ami_gui_vscroll_remove(struct gui_window_2 *gwin)
 	IDoMethod(gwin->objects[GID_VSCROLLLAYOUT], LM_REMOVECHILD,
 			gwin->win, gwin->objects[GID_VSCROLL]);
 #else
-	SetAttrs(gwin->objects[GID_VSCROLLLAYOUT], LAYOUT_RemoveChild, gwin->objects[GID_VSCROLL], TAG_DONE);
+	SetGadgetAttrs((struct Gadget *)gwin->objects[GID_VSCROLLLAYOUT],
+			gwin->win, NULL,
+			LAYOUT_RemoveChild, gwin->objects[GID_VSCROLL], TAG_DONE);
 #endif
 
 	gwin->objects[GID_VSCROLL] = NULL;
@@ -2289,7 +2303,8 @@ static void ami_gui_console_log_add(struct gui_window *g)
 	IDoMethod(g->shared->objects[GID_LOGLAYOUT], LM_ADDCHILD,
 			g->shared->win, g->shared->objects[GID_LOG], NULL);
 #else
-	SetAttrs(g->shared->objects[GID_LOGLAYOUT],
+	SetGadgetAttrs((struct Gadget *)g->shared->objects[GID_LOGLAYOUT],
+		g->shared->win, NULL,
 		LAYOUT_AddChild, g->shared->objects[GID_LOG], TAG_MORE, &attrs);
 #endif
 
@@ -2309,7 +2324,8 @@ static void ami_gui_console_log_remove(struct gui_window *g)
 	IDoMethod(g->shared->objects[GID_LOGLAYOUT], LM_REMOVECHILD,
 			g->shared->win, g->shared->objects[GID_LOG]);
 #else
-	SetAttrs(g->shared->objects[GID_LOGLAYOUT],
+	SetGadgetAttrs((struct Gadget *)g->shared->objects[GID_LOGLAYOUT],
+		g->shared->win, NULL,
 		LAYOUT_RemoveChild, g->shared->objects[GID_LOG], TAG_DONE);
 #endif
 
@@ -2471,7 +2487,7 @@ static void gui_window_set_icon(struct gui_window *g, struct hlcache_handle *ico
 	if ((icon != NULL) && ((icon_bitmap = content_get_bitmap(icon)) != NULL))
 	{
 		bm = ami_bitmap_get_native(icon_bitmap, 16, 16, ami_plot_screen_is_palettemapped(),
-					g->shared->win->RPort->BitMap);
+					g->shared->win->RPort->BitMap, nsoption_colour(sys_colour_ButtonFace));
 	}
 
 	if(g == g->shared->gw) {
@@ -2481,17 +2497,19 @@ static void gui_window_set_icon(struct gui_window *g, struct hlcache_handle *ico
 		if(bm)
 		{
 			ULONG tag, tag_data, minterm;
-
+#ifdef __amigaos4__
 			if(ami_plot_screen_is_palettemapped() == false) {
 				tag = BLITA_UseSrcAlpha;
 				tag_data = !amiga_bitmap_get_opaque(icon_bitmap);
 				minterm = 0xc0;
 			} else {
 				tag = BLITA_MaskPlane;
+#endif
 				tag_data = (ULONG)ami_bitmap_get_mask(icon_bitmap, 16, 16, bm);
 				minterm = MINTERM_SRCMASK;
+#ifdef __amigaos4__
 			}
-
+#endif
 			if(ami_gui_get_space_box((Object *)g->shared->objects[GID_ICON], &bbox) != NSERROR_OK) {
 				amiga_warn_user("NoMemory", "");
 				return;
@@ -2515,7 +2533,7 @@ static void gui_window_set_icon(struct gui_window *g, struct hlcache_handle *ico
 						tag, tag_data,
 						TAG_DONE);
 #else
-			if(tag_data) {
+			if(!amiga_bitmap_get_opaque(icon_bitmap)) {
 				BltMaskBitMapRastPort(bm, 0, 0, g->shared->win->RPort,
 							bbox->Left, bbox->Top, 16, 16, minterm, tag_data);
 			} else {
@@ -2875,16 +2893,17 @@ static BOOL ami_gui_event(void *w)
 
 							browser_window_destroy(closedgw->bw);
 						} else {
-							ami_switch_tab(gwin, true);
+							GetAttr(CLICKTAB_CurrentNode, (Object *)gwin->objects[GID_TABS], (ULONG *)&tabnode);
+							if(tabnode != gwin->new_tab_tab) {
+								ami_switch_tab(gwin, true);
+							} else {
+								ami_gui_new_blank_tab(gwin);
+							}
 						}
 					break;
 
 					case GID_CLOSETAB:
 						browser_window_destroy(gwin->gw->bw);
-					break;
-
-					case GID_ADDTAB:
-						ami_gui_new_blank_tab(gwin);
 					break;
 
 					case GID_URL:
@@ -2916,12 +2935,25 @@ static BOOL ami_gui_event(void *w)
 
 					case GID_TOOLBARLAYOUT:
 						/* Need fixing: never gets here */
-						search_web_select_provider(-1);
 					break;
 
 					case GID_SEARCH_ICON:
-						GetAttr(CHOOSER_Selected, gwin->objects[GID_SEARCH_ICON], (ULONG *)&storage);
-						search_web_select_provider(storage);
+#ifdef __amigaos4__
+					{
+						char *prov = NULL;
+						struct Node *chooser_node = NULL;
+
+						GetAttr(CHOOSER_SelectedNode, gwin->objects[GID_SEARCH_ICON],(ULONG *)&chooser_node);
+
+						if(chooser_node != NULL) {
+							GetChooserNodeAttrs(chooser_node, CNA_Text, (ULONG *)&prov, TAG_DONE);
+							if(prov != NULL) nsoption_set_charp(search_web_provider, (char *)strdup(prov));
+						}
+					}
+#else
+					/* TODO: Fix for OS<3.2 */
+#endif
+						search_web_select_provider(nsoption_charp(search_web_provider));
 					break;
 
 					case GID_SEARCHSTRING:
@@ -3184,8 +3216,17 @@ static BOOL ami_gui_event(void *w)
 				amiga_icon_superimpose_favicon_internal(gwin->gw->favicon,
 					gwin->dobj);
 				HideWindow(gwin->win);
+				if(strlen(gwin->wintitle) > 23) {
+					strncpy(gwin->icontitle, gwin->wintitle, 20);
+					gwin->icontitle[20] = '.';
+					gwin->icontitle[21] = '.';
+					gwin->icontitle[22] = '.';
+					gwin->icontitle[23] = '\0';
+				} else {
+					strlcpy(gwin->icontitle, gwin->wintitle, 23);
+				}
 				gwin->appicon = AddAppIcon((ULONG)gwin->objects[OID_MAIN],
-									(ULONG)gwin, gwin->win->Title, appport,
+									(ULONG)gwin, gwin->icontitle, appport,
 									0, gwin->dobj, NULL);
 
 				cur_gw = NULL;
@@ -3529,7 +3570,7 @@ void ami_get_msg(void)
 		 * are in use, so we add 1. */
 
 		if (waitselect(max_fd + 1, &read_fd_set, &write_fd_set, &except_fd_set,
-				NULL, (unsigned int *)&signalmask) != -1) {
+				NULL, (ULONG *)&signalmask) != -1) {
 			signal = signalmask;
 		} else {
 			NSLOG(netsurf, INFO, "waitselect() returned error");
@@ -3989,13 +4030,17 @@ void ami_gui_update_hotlist_button(struct gui_window_2 *gwin)
 	if(nsurl_create(url, &nsurl) == NSERROR_OK) {
 		if(hotlist_has_url(nsurl)) {
 			RefreshSetGadgetAttrs((struct Gadget *)gwin->objects[GID_FAVE], gwin->win, NULL,
-				BUTTON_RenderImage, gwin->objects[GID_FAVE_RMV], TAG_DONE);
+				BUTTON_RenderImage, gwin->objects[GID_FAVE_RMV],
+				GA_HintInfo, gwin->helphints[GID_FAVE_RMV],
+				TAG_DONE);
 
 			if (gwin->gw->favicon)
 				ami_gui_cache_favicon(nsurl, content_get_bitmap(gwin->gw->favicon));
 		} else {
 			RefreshSetGadgetAttrs((struct Gadget *)gwin->objects[GID_FAVE], gwin->win, NULL,
-				BUTTON_RenderImage, gwin->objects[GID_FAVE_ADD], TAG_DONE);
+				BUTTON_RenderImage, gwin->objects[GID_FAVE_ADD],
+				GA_HintInfo, gwin->helphints[GID_FAVE_ADD],
+				TAG_DONE);
 		}
 		
 		nsurl_unref(nsurl);
@@ -4014,7 +4059,7 @@ static bool ami_gui_hotlist_add(void *userdata, int level, int item,
 	if(item > AMI_GUI_TOOLBAR_MAX) return false;
 	if(is_folder == true) return false;
 
-	if(utf8_from_local_encoding(title,
+	if(utf8_to_local_encoding(title,
 		(strlen(title) < NSA_MAX_HOTLIST_BUTTON_LEN) ? strlen(title) : NSA_MAX_HOTLIST_BUTTON_LEN,
 		&utf8title) != NSERROR_OK)
 		return false;
@@ -4102,9 +4147,11 @@ static void ami_gui_hotlist_toolbar_add(struct gui_window_2 *gwin)
 				gwin->win, gwin->objects[GID_HOTLISTSEPBAR], NULL);
 
 #else
-		SetAttrs(gwin->objects[GID_HOTLISTLAYOUT],
+		SetGadgetAttrs((struct Gadget *)gwin->objects[GID_HOTLISTLAYOUT],
+			gwin->win, NULL,
 			LAYOUT_AddChild, gwin->objects[GID_HOTLIST], TAG_MORE, &attrs);
-		SetAttrs(gwin->objects[GID_HOTLISTLAYOUT],
+		SetGadgetAttrs((struct Gadget *)gwin->objects[GID_HOTLISTLAYOUT],
+			gwin->win, NULL,
 			LAYOUT_AddChild, gwin->objects[GID_HOTLISTSEPBAR], TAG_DONE);
 #endif
 
@@ -4151,9 +4198,11 @@ static void ami_gui_hotlist_toolbar_remove(struct gui_window_2 *gwin)
 	IDoMethod(gwin->objects[GID_HOTLISTLAYOUT], LM_REMOVECHILD,
 			gwin->win, gwin->objects[GID_HOTLISTSEPBAR]);
 #else
-	SetAttrs(gwin->objects[GID_HOTLISTLAYOUT],
+	SetGadgetAttrs((struct Gadget *)gwin->objects[GID_HOTLISTLAYOUT],
+		gwin->win, NULL,
 		LAYOUT_RemoveChild, gwin->objects[GID_HOTLIST], TAG_DONE);
-	SetAttrs(gwin->objects[GID_HOTLISTLAYOUT],
+	SetGadgetAttrs((struct Gadget *)gwin->objects[GID_HOTLISTLAYOUT],
+		gwin->win, NULL,
 		LAYOUT_RemoveChild, gwin->objects[GID_HOTLISTSEPBAR], TAG_DONE);
 #endif
 	FlushLayoutDomainCache((struct Gadget *)gwin->objects[GID_MAIN]);
@@ -4237,43 +4286,30 @@ static void ami_toggletabbar(struct gui_window_2 *gwin, bool show)
 					CLICKTAB_LabelTruncate, TRUE,
 					CLICKTAB_CloseImage, gwin->objects[GID_CLOSETAB_BM],
 					CLICKTAB_FlagImage, gwin->objects[GID_TABS_FLAG],
+#ifdef __amigaos4__
+					CLICKTAB_EvenSize, FALSE,
+#endif
 					ClickTabEnd;
 
-		gwin->objects[GID_ADDTAB] = ButtonObj,
-					GA_ID, GID_ADDTAB,
-					GA_RelVerify, TRUE,
-					GA_HintInfo, gwin->helphints[GID_ADDTAB],
-					GA_Text, "+",
-					BUTTON_RenderImage, gwin->objects[GID_ADDTAB_BM],
-					ButtonEnd;
 #ifdef __amigaos4__
 		IDoMethod(gwin->objects[GID_TABLAYOUT], LM_ADDCHILD,
 				gwin->win, gwin->objects[GID_TABS], NULL);
-
-		IDoMethod(gwin->objects[GID_TABLAYOUT], LM_ADDCHILD,
-				gwin->win, gwin->objects[GID_ADDTAB], attrs);
 #else
-		SetAttrs(gwin->objects[GID_TABLAYOUT],
+		SetGadgetAttrs((struct Gadget *)gwin->objects[GID_TABLAYOUT],
+				gwin->win, NULL,
 				LAYOUT_AddChild, gwin->objects[GID_TABS], TAG_DONE);
-		SetAttrs(gwin->objects[GID_TABLAYOUT],
-				LAYOUT_AddChild, gwin->objects[GID_ADDTAB], TAG_MORE, &attrs);
 #endif
 	} else {
 #ifdef __amigaos4__
 		IDoMethod(gwin->objects[GID_TABLAYOUT], LM_REMOVECHILD,
 				gwin->win, gwin->objects[GID_TABS]);
-
-		IDoMethod(gwin->objects[GID_TABLAYOUT], LM_REMOVECHILD,
-				gwin->win, gwin->objects[GID_ADDTAB]);
 #else
-		SetAttrs(gwin->objects[GID_TABLAYOUT],
+		SetGadgetAttrs((struct Gadget *)gwin->objects[GID_TABLAYOUT],
+				gwin->win, NULL,
 				LAYOUT_RemoveChild, gwin->objects[GID_TABS], TAG_DONE);
-		SetAttrs(gwin->objects[GID_TABLAYOUT],
-				LAYOUT_RemoveChild, gwin->objects[GID_ADDTAB], TAG_DONE);
 #endif
 
 		gwin->objects[GID_TABS] = NULL;
-		gwin->objects[GID_ADDTAB] = NULL;
 	}
 
 	FlushLayoutDomainCache((struct Gadget *)gwin->objects[GID_MAIN]);
@@ -4316,10 +4352,6 @@ void ami_gui_tabs_toggle_all(void)
 	} while((node = nnode));
 }
 
-static void ami_gui_search_ico_refresh(void *p)
-{
-	search_web_select_provider(-1);
-}
 
 /**
  * Count windows, and optionally tabs.
@@ -4369,19 +4401,6 @@ void ami_gui_adjust_scale(struct gui_window *gw, float adjustment)
 	ami_schedule_redraw(gw->shared, true);
 }
 
-void ami_gui_switch_to_new_tab(struct gui_window_2 *gwin)
-{
-	if(nsoption_bool(new_tab_is_active) == true) return;
-
-	/* Switch to the just-opened tab (if new_tab_is_active, we already did!) */
-	RefreshSetGadgetAttrs((struct Gadget *)gwin->objects[GID_TABS],
-							gwin->win, NULL,
-							CLICKTAB_CurrentNode, gwin->last_new_tab,
-							TAG_DONE);
-
-	ami_switch_tab(gwin, false);
-}
-
 nserror ami_gui_new_blank_tab(struct gui_window_2 *gwin)
 {
 	nsurl *url;
@@ -4391,7 +4410,7 @@ nserror ami_gui_new_blank_tab(struct gui_window_2 *gwin)
 	error = nsurl_create(nsoption_charp(homepage_url), &url);
 	if (error == NSERROR_OK) {
 		error = browser_window_create(BW_CREATE_HISTORY |
-					      BW_CREATE_TAB,
+					      BW_CREATE_TAB | BW_CREATE_FOREGROUND,
 					      url,
 					      NULL,
 					      gwin->gw->bw,
@@ -4402,8 +4421,6 @@ nserror ami_gui_new_blank_tab(struct gui_window_2 *gwin)
 		amiga_warn_user(messages_get_errorcode(error), 0);
 		return error;
 	}
-
-	ami_gui_switch_to_new_tab(gwin);
 
 	return NSERROR_OK;
 }
@@ -4701,9 +4718,7 @@ gui_window_create(struct browser_window *bw,
 		gui_window_create_flags flags)
 {
 	struct gui_window *g = NULL;
-	ULONG offset = 0;
-	ULONG curx = nsoption_int(window_x), cury = nsoption_int(window_y);
-	ULONG curw = nsoption_int(window_width), curh = nsoption_int(window_height);
+	struct Window *ref = NULL;
 	char nav_west[100],nav_west_s[100],nav_west_g[100];
 	char nav_east[100],nav_east_s[100],nav_east_g[100];
 	char stop[100],stop_s[100],stop_g[100];
@@ -4725,22 +4740,9 @@ gui_window_create(struct browser_window *bw,
 	if (nsoption_bool(kiosk_mode)) flags &= ~GW_CREATE_TAB;
 	if (nsoption_bool(resize_with_contents)) idcmp_sizeverify = 0;
 
-	/* Offset the new window by titlebar + 1 as per AmigaOS style guide.
-	 * If we don't have a clone window we offset by all windows open. */
-	offset = scrn->WBorTop + scrn->Font->ta_YSize + 1;
-
 	if(existing) {
-		curx = existing->shared->win->LeftEdge;
-		cury = existing->shared->win->TopEdge + offset;
-		curw = existing->shared->win->Width;
-		curh = existing->shared->win->Height;
-	} else {
-		if(nsoption_bool(kiosk_mode) == false) {
-			cury += offset * ami_gui_count_windows(0, NULL);
-		}
+		ref = existing->shared->win;
 	}
-
-	if(curh > (scrn->Height - cury)) curh = scrn->Height - cury;
 
 	g = calloc(1, sizeof(struct gui_window));
 
@@ -4808,15 +4810,11 @@ gui_window_create(struct browser_window *bw,
 								TNA_CloseGadget, TRUE,
 								TAG_DONE);
 
-		if(nsoption_bool(new_tab_last)) {
-			AddTail(&g->shared->tab_list, g->tab_node);
-		} else {
-			struct Node *insert_after = existing->tab_node;
+		struct Node *insert_after = existing->tab_node;
 
-			if(g->shared->last_new_tab)
-				insert_after = g->shared->last_new_tab;
-			Insert(&g->shared->tab_list, g->tab_node, insert_after);
-		}
+		if(g->shared->last_new_tab)
+			insert_after = g->shared->last_new_tab;
+		Insert(&g->shared->tab_list, g->tab_node, insert_after);
 
 		g->shared->last_new_tab = g->tab_node;
 
@@ -4825,7 +4823,7 @@ gui_window_create(struct browser_window *bw,
 							CLICKTAB_Labels, &g->shared->tab_list,
 							TAG_DONE);
 
-		if(nsoption_bool(new_tab_is_active)) {
+		if(flags & GW_CREATE_FOREGROUND) {
 			RefreshSetGadgetAttrs((struct Gadget *)g->shared->objects[GID_TABS],
 							g->shared->win, NULL,
 							CLICKTAB_Current, g->tab,
@@ -4839,7 +4837,7 @@ gui_window_create(struct browser_window *bw,
 
 		g->shared->next_tab++;
 
-		if(nsoption_bool(new_tab_is_active)) ami_switch_tab(g->shared,false);
+		if(flags & GW_CREATE_FOREGROUND) ami_switch_tab(g->shared,false);
 
 		ami_update_buttons(g->shared);
 		ami_schedule(0, ami_gui_refresh_favicon, g->shared);
@@ -4890,6 +4888,7 @@ gui_window_create(struct browser_window *bw,
 	{
 		ULONG addtabclosegadget = TAG_IGNORE;
 		ULONG iconifygadget = FALSE;
+		int ws_idx = 0;
 
 #ifdef __amigaos4__
 		if (nsoption_charp(pubscreen_name) && 
@@ -4909,7 +4908,8 @@ gui_window_create(struct browser_window *bw,
 											TAG_DONE);
 		AddTail(&g->shared->tab_list,g->tab_node);
 
-		g->shared->web_search_list = ami_gui_opts_websearch();
+
+		g->shared->web_search_list = ami_gui_opts_websearch(&ws_idx);
 		g->shared->search_bm = NULL;
 
 		g->shared->tabs=1;
@@ -4931,7 +4931,7 @@ gui_window_create(struct browser_window *bw,
 			translate_escape_chars(messages_get("HelpToolbarURL"));
 		g->shared->helphints[GID_SEARCHSTRING] =
 			translate_escape_chars(messages_get("HelpToolbarWebSearch"));
-		g->shared->helphints[GID_ADDTAB] =
+		g->shared->helphints[GID_ADDTAB_HINT] =
 			translate_escape_chars(messages_get("HelpToolbarAddTab"));
 
 		g->shared->helphints[GID_PAGEINFO_INSECURE_BM] = ami_utf8_easy(messages_get("PageInfoInsecure"));
@@ -4939,6 +4939,9 @@ gui_window_create(struct browser_window *bw,
 		g->shared->helphints[GID_PAGEINFO_SECURE_BM] = ami_utf8_easy(messages_get("PageInfoSecure"));
 		g->shared->helphints[GID_PAGEINFO_WARNING_BM] = ami_utf8_easy(messages_get("PageInfoWarning"));
 		g->shared->helphints[GID_PAGEINFO_INTERNAL_BM] = ami_utf8_easy(messages_get("PageInfoInternal"));
+
+		g->shared->helphints[GID_FAVE_ADD] = ami_utf8_easy(messages_get("HelpToolbarHotlistStar"));
+		g->shared->helphints[GID_FAVE_RMV] = ami_utf8_easy(messages_get("HelpToolbarHotlistStarLit"));
 
 		ami_get_theme_filename(nav_west, "theme_nav_west", false);
 		ami_get_theme_filename(nav_west_s, "theme_nav_west_s", false);
@@ -4982,21 +4985,25 @@ gui_window_create(struct browser_window *bw,
 					BITMAP_Masking, TRUE,
 					BitMapEnd;
 
-		g->shared->objects[GID_ADDTAB_BM] = BitMapObj,
-					BITMAP_SourceFile, addtab,
-					BITMAP_SelectSourceFile, addtab_s,
-					BITMAP_DisabledSourceFile, addtab_g,
-					BITMAP_Screen, scrn,
-					BITMAP_Masking, TRUE,
-					BitMapEnd;
+		if(LIB_IS_AT_LEAST((struct Library *)IntuitionBase,54,27)) {
+#ifdef __amigaos4__
+			struct DrawInfo *dri = GetScreenDrawInfo(scrn);
+			g->shared->objects[GID_CLOSETAB_BM] = NewObject(NULL, "sysiclass",
+									SYSIA_Which, TABCLOSEIMAGE,
+									SYSIA_DrawInfo, dri,
+									TAG_DONE);
 
-		g->shared->objects[GID_CLOSETAB_BM] = BitMapObj,
+			FreeScreenDrawInfo(scrn, dri);
+#endif
+		} else {
+			g->shared->objects[GID_CLOSETAB_BM] = BitMapObj,
 					BITMAP_SourceFile, closetab,
 					BITMAP_SelectSourceFile, closetab_s,
 					BITMAP_DisabledSourceFile, closetab_g,
 					BITMAP_Screen, scrn,
 					BITMAP_Masking, TRUE,
 					BitMapEnd;
+		}
 
 		g->shared->objects[GID_PAGEINFO_INSECURE_BM] = BitMapObj,
 					BITMAP_SourceFile, pi_insecure,
@@ -5029,6 +5036,13 @@ gui_window_create(struct browser_window *bw,
 					BitMapEnd;
 
 
+                /* add a new tab tab */
+                g->shared->new_tab_tab = AllocClickTabNode(
+						TNA_Text, "+",
+						TNA_HintInfo, g->shared->helphints[GID_ADDTAB_HINT],
+						TAG_DONE);
+                AddTail(&g->shared->tab_list, g->shared->new_tab_tab);
+
 		if(ClickTabBase->lib_Version < 53)
 		{
 			addtabclosegadget = LAYOUT_AddChild;
@@ -5045,13 +5059,6 @@ gui_window_create(struct browser_window *bw,
 					CLICKTAB_Labels,&g->shared->tab_list,
 					CLICKTAB_LabelTruncate,TRUE,
 					ClickTabEnd;
-
-			g->shared->objects[GID_ADDTAB] = ButtonObj,
-					GA_ID, GID_ADDTAB,
-					GA_RelVerify, TRUE,
-					GA_Text, "+",
-					BUTTON_RenderImage, g->shared->objects[GID_ADDTAB_BM],
-					ButtonEnd;
 		}
 		else
 		{
@@ -5071,10 +5078,6 @@ gui_window_create(struct browser_window *bw,
 			WA_DragBar, TRUE,
 			WA_CloseGadget, TRUE,
 			WA_SizeGadget, TRUE,
-			WA_Top,cury,
-			WA_Left,curx,
-			WA_Width,curw,
-			WA_Height,curh,
 			WA_PubScreen,scrn,
 			WA_ReportMouse,TRUE,
 			refresh_mode, TRUE,
@@ -5086,6 +5089,8 @@ gui_window_create(struct browser_window *bw,
 				IDCMP_GADGETUP | IDCMP_IDCMPUPDATE |
 				IDCMP_REFRESHWINDOW |
 				IDCMP_ACTIVEWINDOW | IDCMP_EXTENDEDMOUSE,
+			WINDOW_Position, WPOS_FULLSCREEN,
+			WINDOW_RefWindow, ref,
 			WINDOW_IconifyGadget, iconifygadget,
 			WINDOW_MenuStrip, menu,
 			WINDOW_MenuUserData, WGUD_HOOK,
@@ -5096,6 +5101,10 @@ gui_window_create(struct browser_window *bw,
 			WINDOW_SharedPort, sport,
 			WINDOW_BuiltInScroll, TRUE,
 			WINDOW_GadgetHelp, TRUE,
+#ifdef __amigaos4__
+			WINDOW_UniqueID, "NS_MAIN_WIN",
+			WINDOW_PopupGadget, TRUE,
+#endif
 			WINDOW_UserData, g->shared,
   			WINDOW_ParentGroup, g->shared->objects[GID_MAIN] = LayoutVObj,
 				LAYOUT_DeferLayout, defer_layout,
@@ -5270,10 +5279,6 @@ gui_window_create(struct browser_window *bw,
 
 					addtabclosegadget, g->shared->objects[GID_TABS],
 					CHILD_CacheDomain,FALSE,
-
-					addtabclosegadget, g->shared->objects[GID_ADDTAB],
-					CHILD_WeightedWidth,0,
-					CHILD_WeightedHeight,0,
 				LayoutEnd,
 				CHILD_WeightedHeight,0,
 				LAYOUT_AddChild, LayoutVObj,
@@ -5283,6 +5288,8 @@ gui_window_create(struct browser_window *bw,
 								LAYOUT_AddChild, g->shared->objects[GID_BROWSER] = SpaceObj,
 									GA_ID,GID_BROWSER,
 									SPACE_Transparent,TRUE,
+									SPACE_MinWidth, 16,
+									SPACE_MinHeight, 16,
 									SPACE_RenderHook, &g->shared->browser_hook,
 								SpaceEnd,
 							EndGroup,
@@ -5359,6 +5366,9 @@ gui_window_create(struct browser_window *bw,
 
 	NSLOG(netsurf, INFO, "Window opened, adding border gadgets");
 
+	/* Clear the reference window pointer to ensure it doesn't get used later */
+	SetAttrs(g->shared->objects[OID_MAIN], WINDOW_RefWindow, NULL, TAG_DONE);
+
 	if(!g->shared->win)
 	{
 		amiga_warn_user("NoMemory","");
@@ -5433,8 +5443,6 @@ gui_window_create(struct browser_window *bw,
 		locked_screen = FALSE;
 	}
 
-	ami_schedule(0, ami_gui_search_ico_refresh, NULL);
-
 	ScreenToFront(scrn);
 
 	return g;
@@ -5461,7 +5469,7 @@ static void ami_gui_close_tabs(struct gui_window_2 *gwin, bool other_tabs)
 								TNA_UserData,&gw,
 								TAG_DONE);
 
-			if((other_tabs == false) || (gwin->gw != gw)) {
+			if(gw &&((other_tabs == false) || (gwin->gw != gw))) {
 				browser_window_destroy(gw->bw);
 			}
 		} while((tab=ntab));
@@ -5559,7 +5567,6 @@ static void gui_window_destroy(struct gui_window *g)
 
 	/* These aren't freed by the above.
 	 * TODO: nav_west etc need freeing too? */
-	DisposeObject(g->shared->objects[GID_ADDTAB_BM]);
 	DisposeObject(g->shared->objects[GID_CLOSETAB_BM]);
 	DisposeObject(g->shared->objects[GID_TABS_FLAG]);
 	DisposeObject(g->shared->objects[GID_FAVE_ADD]);
@@ -5588,6 +5595,7 @@ static void gui_window_destroy(struct gui_window *g)
 	free(g->shared->wintitle);
 	ami_utf8_free(g->shared->status);
 	free(g->shared->svbuffer);
+	FreeClickTabNode(g->shared->new_tab_tab);
 
 	for(gid = 0; gid < GID_LAST; gid++)
 		ami_utf8_free(g->shared->helphints[gid]);
@@ -5608,7 +5616,6 @@ static void gui_window_destroy(struct gui_window *g)
 
 	win_destroyed = true;
 }
-
 
 static void ami_redraw_callback(void *p)
 {
@@ -6009,7 +6016,7 @@ static nserror gui_search_web_provider_update(const char *provider_name,
 	if(nsoption_bool(kiosk_mode) == true) return NSERROR_BAD_PARAMETER;
 
 	if (ico_bitmap != NULL) {
-		bm = ami_bitmap_get_native(ico_bitmap, 16, 16, ami_plot_screen_is_palettemapped(), NULL);
+		bm = ami_bitmap_get_native(ico_bitmap, 16, 16, ami_plot_screen_is_palettemapped(), NULL, nsoption_colour(sys_colour_ButtonFace));
 	}
 
 	if(bm == NULL) return NSERROR_BAD_PARAMETER;
@@ -6046,6 +6053,7 @@ static nserror gui_search_web_provider_update(const char *provider_name,
 				GA_HintInfo, provider_name,
 				GA_Image, gwin->search_bm,
 				TAG_DONE);
+
 		}
 	} while((node = nnode));
 
@@ -6541,6 +6549,7 @@ int main(int argc, char** argv)
 	struct netsurf_table amiga_table = {
 		.misc = &amiga_misc_table,
 		.window = &amiga_window_table,
+		.corewindow = amiga_core_window_table,
 		.clipboard = amiga_clipboard_table,
 		.download = amiga_download_table,
 		.fetch = &amiga_fetch_table,
@@ -6588,7 +6597,7 @@ int main(int argc, char** argv)
 	}
 
 	current_user = ami_gui_read_all_tooltypes(argc, argv);
-	struct RDArgs *args = ami_gui_commandline(&argc, argv, &nargc, &nargv);
+	char **args = ami_gui_commandline(&argc, argv, &nargc, &nargv);
 
 	current_user_dir = ami_gui_get_user_dir(current_user);
 	if(current_user_dir == NULL) {
@@ -6604,11 +6613,12 @@ int main(int argc, char** argv)
 
 #ifdef __amigaos4__
 	amiga_plugin_hack_init();
+#endif
 
-	/* DataTypes loader needs datatypes.library v45,
-	 * but for some reason that's not in OS3.9.
-	 * Skip it to ensure it isn't causing other problems. */
-	ret = amiga_datatypes_init();
+#ifdef WITH_AMIGA_DATATYPES
+	/* DataTypes loader needs datatypes.library v45 */
+	if(DataTypesBase->lib_Version >= 45)
+		ret = amiga_datatypes_init();
 #endif
 
 	/* user options setup */
@@ -6622,8 +6632,16 @@ int main(int argc, char** argv)
 	}
 	ami_nsoption_read();
 	if(args != NULL) {
-		nsoption_commandline(&nargc, &nargv, NULL);
-		FreeArgs(args);
+		nsoption_commandline(&nargc, nargv, NULL);
+
+		for(int i = 0; i < nargc; i++) {
+			if(args[i]) {
+				NSLOG(netsurf, INFO, "Freeing fake arg %d: %s", i, args[i]);
+				free(args[i]);
+			}
+		}
+		NSLOG(netsurf, INFO, "Freeing fake arg array");
+		free(args);
 	}
 
 	if (ami_locate_resource(messages, "Messages") == false) {

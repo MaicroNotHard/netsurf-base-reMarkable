@@ -457,7 +457,7 @@ ami_cw_toggle_scrollbar(struct ami_corewindow *ami_cw, bool vert, bool visible)
 #ifdef __amigaos4__
 			IDoMethod(layout, LM_ADDCHILD, ami_cw->win, scroller, NULL);
 #else
-			SetAttrs(layout, LAYOUT_AddChild, scroller, TAG_DONE);
+			SetGadgetAttrs((struct Gadget *)layout, ami_cw->win, NULL, LAYOUT_AddChild, scroller, TAG_DONE);
 #endif
 		}
 	} else {
@@ -469,7 +469,7 @@ ami_cw_toggle_scrollbar(struct ami_corewindow *ami_cw, bool vert, bool visible)
 #ifdef __amigaos4__
 			IDoMethod(layout, LM_REMOVECHILD, ami_cw->win, scroller);
 #else
-			SetAttrs(layout, LAYOUT_RemoveChild, scroller, TAG_DONE);
+			SetGadgetAttrs((struct Gadget *)layout, ami_cw->win, NULL, LAYOUT_RemoveChild, scroller, TAG_DONE);
 #endif
 		}
 	}
@@ -913,20 +913,21 @@ ami_cw_drag_status(struct core_window *cw, core_window_drag_status ds)
 }
 
 
-struct core_window_callback_table ami_cw_cb_table = {
+struct core_window_table ami_cw_cb_table = {
         .invalidate = ami_cw_invalidate_area,
-        .update_size = ami_cw_update_size,
+        .set_extent = ami_cw_update_size,
         .set_scroll = ami_cw_set_scroll,
         .get_scroll = ami_cw_get_scroll,
-        .get_window_dimensions = ami_cw_get_window_dimensions,
+        .get_dimensions = ami_cw_get_window_dimensions,
         .drag_status = ami_cw_drag_status
 };
+
+struct core_window_table *amiga_core_window_table = &ami_cw_cb_table;
 
 /* exported function documented example/corewindow.h */
 nserror ami_corewindow_init(struct ami_corewindow *ami_cw)
 {
 	/* setup the core window callback table */
-	ami_cw->cb_table = &ami_cw_cb_table;
 	ami_cw->drag_status = CORE_WINDOW_DRAG_NONE;
 
 	/* clear some vars */

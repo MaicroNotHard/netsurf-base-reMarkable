@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2015-2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -26,9 +26,6 @@ struct BitMap *ami_rtg_allocbitmap(ULONG width, ULONG height, ULONG depth,
 	ULONG flags, struct BitMap *friend, RGBFTYPE format)
 {
 	if(P96Base == NULL) {
-#ifndef __amigaos4__
-		if(depth > 8) depth = 8;
-#endif
 		return AllocBitMap(width, height, depth, flags, friend);
 	} else {
 		return p96AllocBitMap(width, height, depth, flags, friend, format);
@@ -56,7 +53,7 @@ void ami_rtg_writepixelarray(UBYTE *pixdata, struct BitMap *bm,
 	if(P96Base == NULL) {
 #ifdef __amigaos4__
 		if(GfxBase->LibNode.lib_Version >= 54) {
-			WritePixelArray(pixdata, 0, 0, bpr, PIXF_R8G8B8A8, &trp, 0, 0, width, height);
+			WritePixelArray(pixdata, 0, 0, bpr, PIXF_A8R8G8B8, &trp, 0, 0, width, height);
 		}
 #endif
 	} else {
@@ -67,6 +64,32 @@ void ami_rtg_writepixelarray(UBYTE *pixdata, struct BitMap *bm,
 		ri.RGBFormat = format;
 
 		p96WritePixelArray((struct RenderInfo *)&ri, 0, 0, &trp, 0, 0, width, height);
+	}
+}
+
+void ami_rtg_readpixelarray(struct BitMap *bm, UBYTE **pixdata,
+	ULONG width, ULONG height, ULONG bpr, ULONG format)
+{
+	struct RastPort trp;
+
+	InitRastPort(&trp);
+	trp.BitMap = bm;
+
+	/* This requires P96 or gfx.lib v54 currently */
+	if(P96Base == NULL) {
+#ifdef __amigaos4__
+		if(GfxBase->LibNode.lib_Version >= 54) {
+			ReadPixelArray(&trp, 0, 0, *pixdata, 0, 0, bpr, PIXF_A8R8G8B8, width, height);
+		}
+#endif
+	} else {
+		struct RenderInfo ri;
+
+		ri.Memory = *pixdata;
+		ri.BytesPerRow = bpr;
+		ri.RGBFormat = format;
+
+		p96ReadPixelArray((struct RenderInfo *)&ri, 0, 0, &trp, 0, 0, width, height);
 	}
 }
 

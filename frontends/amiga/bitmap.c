@@ -1,5 +1,5 @@
 /*
- * Copyright 2008, 2009, 2012, 2016 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2008-2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -78,10 +78,11 @@ struct bitmap {
 	int nativebmheight;
 	PLANEPTR native_mask;
 	Object *dto;
-	APTR drawhandle;
 	struct nsurl *url;   /* temporary storage space */
 	char *title; /* temporary storage space */
 	ULONG *icondata; /* for appicons */
+	colour bg; /* alpha blended */
+	APTR drawhandle; /* guigfx */
 };
 
 enum {
@@ -108,7 +109,7 @@ static APTR pool_bitmap = NULL;
 static bool guigfx_warned = false;
 
 /* exported function documented in amiga/bitmap.h */
-void *amiga_bitmap_create(int width, int height, unsigned int state)
+void *amiga_bitmap_create(int width, int height, enum gui_bitmap_flags flags)
 {
 	struct bitmap *bitmap;
 
@@ -139,18 +140,17 @@ void *amiga_bitmap_create(int width, int height, unsigned int state)
 	bitmap->width = width;
 	bitmap->height = height;
 
-	if(state & BITMAP_OPAQUE) bitmap->opaque = true;
-		else bitmap->opaque = false;
+	bitmap->opaque = (flags & BITMAP_OPAQUE) == BITMAP_OPAQUE;
 
 	bitmap->nativebm = NULL;
 	bitmap->nativebmwidth = 0;
 	bitmap->nativebmheight = 0;
 	bitmap->native_mask = NULL;
-	bitmap->drawhandle = NULL;
 	bitmap->url = NULL;
 	bitmap->title = NULL;
 	bitmap->icondata = NULL;
 	bitmap->native = AMI_NSBM_NONE;
+	bitmap->drawhandle = NULL;
 
 	return bitmap;
 }
@@ -223,6 +223,9 @@ void amiga_bitmap_destroy(void *bitmap)
 
 		if(bm->native_mask) FreeRaster(bm->native_mask, bm->width, bm->height);
 
+		if(bm->drawhandle) ReleaseDrawHandle(bm->drawhandle);
+		bm->drawhandle = NULL;
+
 #ifdef __amigaos4__
 		if(nsoption_bool(use_extmem) == true) {
 			ami_schedule(-1, amiga_bitmap_unmap_buffer, bm);
@@ -232,7 +235,6 @@ void amiga_bitmap_destroy(void *bitmap)
 		} else
 #endif
 		{
-			if(bm->drawhandle) ReleaseDrawHandle(bm->drawhandle);
 			ami_memory_clear_free(bm->pixdata);
 		}
 
@@ -242,10 +244,9 @@ void amiga_bitmap_destroy(void *bitmap)
 		bm->pixdata = NULL;
 		bm->nativebm = NULL;
 		bm->native_mask = NULL;
-		bm->drawhandle = NULL;
 		bm->url = NULL;
 		bm->title = NULL;
-	
+
 		ami_memory_itempool_free(pool_bitmap, bm, sizeof(struct bitmap));
 		bm = NULL;
 	}
@@ -288,10 +289,8 @@ void amiga_bitmap_modified(void *bitmap)
 #endif
 
 	if(bm->nativebm) ami_rtg_freebitmap(bm->nativebm);
-	if(bm->drawhandle) ReleaseDrawHandle(bm->drawhandle);
 	if(bm->native_mask) FreeRaster(bm->native_mask, bm->width, bm->height);
 	bm->nativebm = NULL;
-	bm->drawhandle = NULL;
 	bm->native_mask = NULL;
 	bm->native = AMI_NSBM_NONE;
 }
@@ -303,25 +302,6 @@ void amiga_bitmap_set_opaque(void *bitmap, bool opaque)
 	struct bitmap *bm = bitmap;
 	assert(bitmap);
 	bm->opaque = opaque;
-}
-
-
-/* exported function documented in amiga/bitmap.h */
-bool amiga_bitmap_test_opaque(void *bitmap)
-{
-	struct bitmap *bm = bitmap;
-	uint32 p = bm->width * bm->height;
-	uint32 a = 0;
-	uint32 *bmi = (uint32 *)amiga_bitmap_get_buffer(bm);
-
-	assert(bitmap);
-
-	for(a=0;a<p;a+=4)
-	{
-		if ((*bmi & 0x000000ffU) != 0x000000ffU) return false;
-		bmi++;
-	}
-	return true;
 }
 
 
@@ -367,40 +347,6 @@ int bitmap_get_height(void *bitmap)
 	}
 }
 
-
-/**
- * Find the bytes per pixel of a bitmap
- *
- * \param  vbitmap  a bitmap, as returned by bitmap_create()
- * \return bytes per pixel
- */
-static size_t bitmap_get_bpp(void *vbitmap)
-{
-	struct bitmap *bitmap = (struct bitmap *)vbitmap;
-	assert(bitmap);
-	return 4;
-}
-
-static void ami_bitmap_argb_to_rgba(struct bitmap *bm)
-{
-	if(bm == NULL) return;
-	
-	ULONG *data = (ULONG *)amiga_bitmap_get_buffer(bm);
-	for(int i = 0; i < (bm->width * bm->height); i++) {
-		data[i] = (data[i] << 8) | (data[i] >> 24);
-	}
-}
-
-static void ami_bitmap_rgba_to_argb(struct bitmap *bm)
-{
-	if(bm == NULL) return;
-	
-	ULONG *data = (ULONG *)amiga_bitmap_get_buffer(bm);
-	for(int i = 0; i < (bm->width * bm->height); i++) {
-		data[i] = (data[ i] >> 8) | (data[i] << 24);
-	}
-}
-
 #ifdef BITMAP_DUMP
 void bitmap_dump(struct bitmap *bitmap)
 {
@@ -436,7 +382,7 @@ Object *ami_datatype_object_from_bitmap(struct bitmap *bitmap)
 		{
 			bmhd->bmh_Width = (UWORD)bitmap_get_width(bitmap);
 			bmhd->bmh_Height = (UWORD)bitmap_get_height(bitmap);
-			bmhd->bmh_Depth = (UBYTE)bitmap_get_bpp(bitmap) * 8;
+			bmhd->bmh_Depth = (UBYTE)32;
 			if(!amiga_bitmap_get_opaque(bitmap)) bmhd->bmh_Masking = mskHasAlpha;
 		}
 
@@ -450,7 +396,7 @@ Object *ami_datatype_object_from_bitmap(struct bitmap *bitmap)
 					TAG_DONE);
 
 		IDoMethod(dto, PDTM_WRITEPIXELARRAY, amiga_bitmap_get_buffer(bitmap),
-					PBPAFMT_RGBA, amiga_bitmap_get_rowstride(bitmap), 0, 0,
+					PBPAFMT_ARGB, amiga_bitmap_get_rowstride(bitmap), 0, 0,
 					bitmap_get_width(bitmap), bitmap_get_height(bitmap));
 	}
 
@@ -475,10 +421,10 @@ struct bitmap *ami_bitmap_from_datatype(char *filename)
 			bm = amiga_bitmap_create(bmh->bmh_Width, bmh->bmh_Height, 0);
 
 			IDoMethod(dto, PDTM_READPIXELARRAY, amiga_bitmap_get_buffer(bm),
-				PBPAFMT_RGBA, amiga_bitmap_get_rowstride(bm), 0, 0,
+				PBPAFMT_ARGB, amiga_bitmap_get_rowstride(bm), 0, 0,
 				bmh->bmh_Width, bmh->bmh_Height);
 
-			amiga_bitmap_set_opaque(bm, amiga_bitmap_test_opaque(bm));
+			amiga_bitmap_set_opaque(bm, bitmap_test_opaque(bm));
 		}
 		DisposeDTObject(dto);
 	}
@@ -486,19 +432,125 @@ struct bitmap *ami_bitmap_from_datatype(char *filename)
 	return bm;
 }
 
+static inline struct BitMap *ami_bitmap_get_guigfx(struct bitmap *bitmap,
+			int width, int height, struct BitMap *restrict friendbm, int type, colour bg)
+{
+	struct BitMap *restrict tbm = NULL;
+	struct Screen *scrn = ami_gui_get_screen();
+
+	if(type == AMI_NSBM_TRUECOLOUR) {
+		tbm = ami_rtg_allocbitmap(width, height, 32, 0,
+			friendbm, AMI_BITMAP_FORMAT);
+		if(tbm == NULL) return NULL;
+	} else {
+		tbm = ami_rtg_allocbitmap(width, height,
+			8, 0, friendbm, AMI_BITMAP_FORMAT);
+		if(tbm == NULL) return NULL;
+	}
+	
+	if(GuiGFXBase != NULL) {
+		struct RastPort rp;
+		InitRastPort(&rp);
+		rp.BitMap = tbm;
+		ULONG dithermode = DITHERMODE_NONE;
+
+		if(nsoption_int(dither_quality) == 1) {
+			dithermode = DITHERMODE_EDD;
+		} else if(nsoption_int(dither_quality) == 2) {
+			dithermode = DITHERMODE_FS;
+		}
+
+		if((!bitmap->opaque) && nsoption_bool(invert_alpha)) {
+			/* invert alpha */
+			unsigned char *bmbuffer = amiga_bitmap_get_buffer(bitmap);
+			for(int i = 0; i < (bitmap->width * bitmap->height * 4); i+=4) {
+				bmbuffer[i] = 255 - bmbuffer[i];
+			}
+		}
+
+		APTR picture = MakePicture(amiga_bitmap_get_buffer(bitmap), bitmap->width, bitmap->height,
+										GGFX_PixelFormat, PIXFMT_0RGB_32,
+										GGFX_AlphaPresent, !bitmap->opaque,
+										GGFX_Independent, TRUE,
+										GGFX_DestWidth, width,
+										GGFX_DestHeight, height,
+										TAG_DONE);
+
+		if((!bitmap->opaque) && nsoption_bool(invert_alpha)) {
+			/* invert alpha */
+			unsigned char *bmbuffer = amiga_bitmap_get_buffer(bitmap);
+			for(int i = 0; i < (bitmap->width * bitmap->height * 4); i+=4) {
+				bmbuffer[i] = 255 - bmbuffer[i];
+			}
+		}
+
+		if(picture == NULL) {
+			amiga_warn_user("BMConvErr", NULL);
+		}
+
+		/* Alpha-blend the image to the provided background colour.
+		 * This appears to be using an inverted alpha on OS3
+		 */
+		if((!bitmap->opaque) && (bg != NS_TRANSPARENT)) {
+			DoPictureMethod(picture, PICMTHD_TINTALPHA, colour_rb_swap(bg), TAG_DONE);
+		}
+
+		if(bitmap->drawhandle) ReleaseDrawHandle(bitmap->drawhandle);
+		
+		bitmap->drawhandle = ObtainDrawHandle(
+			NULL,
+			&rp,
+			scrn->ViewPort.ColorMap,
+			GGFX_DitherMode, dithermode,
+			TAG_DONE);
+
+		if(bitmap->drawhandle) {
+			DrawPicture(bitmap->drawhandle, picture, 0, 0, TAG_DONE);
+		}
+		
+		DeletePicture(picture);
+		
+	} else {
+		if(guigfx_warned == false) {
+			amiga_warn_user("BMConvErr", NULL);
+			guigfx_warned = true;
+		}
+	}
+
+	if(((type == AMI_NSBM_TRUECOLOUR) && (nsoption_int(cache_bitmaps) == 2)) ||
+			((type == AMI_NSBM_PALETTEMAPPED) && (((bitmap->width == width) &&
+			(bitmap->height == height) && (nsoption_int(cache_bitmaps) == 2)) ||
+			(nsoption_int(cache_bitmaps) >= 1)))) {
+		bitmap->nativebm = tbm;
+		bitmap->nativebmwidth = width;
+		bitmap->nativebmheight = height;
+		bitmap->native = type;
+		bitmap->bg = bg;
+	}
+
+	return tbm;
+}
+
 static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
-			int width, int height, struct BitMap *restrict friendbm, int type)
+			int width, int height, struct BitMap *restrict friendbm, int type, colour bg)
 {
 	struct BitMap *restrict tbm = NULL;
 	struct Screen *scrn = ami_gui_get_screen();
 
 	if(bitmap->nativebm)
 	{
-		if((bitmap->nativebmwidth == width) && (bitmap->nativebmheight == height)) {
+#ifndef __amigaos4__
+		BOOL nativebmalphablend = ((bitmap->bg == bg) || bitmap->opaque);
+#else
+		/* No pre-blend alpha on OS4 */
+		BOOL nativebmalphablend = TRUE;
+#endif
+		if((bitmap->nativebmwidth == width) && (bitmap->nativebmheight == height) && nativebmalphablend)
+		{
 			tbm = bitmap->nativebm;
 			return tbm;
 		} else if((bitmap->nativebmwidth == bitmap->width) &&
-				(bitmap->nativebmheight == bitmap->height)) { // >= width/height ?
+				(bitmap->nativebmheight == bitmap->height) && nativebmalphablend) { // >= width/height ?
 			tbm = bitmap->nativebm;
 		} else {
 			if(bitmap->nativebm) amiga_bitmap_modified(bitmap);
@@ -506,6 +558,13 @@ static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
 	}
 
 	if(tbm == NULL) {
+		/* If palette mapped or OS3, use guigfx */
+#ifdef __amigaos4__
+		if(type == AMI_NSBM_PALETTEMAPPED)
+#endif
+			return ami_bitmap_get_guigfx(bitmap, width, height, friendbm, type, bg);
+
+
 		if(type == AMI_NSBM_TRUECOLOUR) {
 			tbm = ami_rtg_allocbitmap(bitmap->width, bitmap->height, 32, 0,
 										friendbm, AMI_BITMAP_FORMAT);
@@ -514,47 +573,6 @@ static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
 			ami_rtg_writepixelarray(amiga_bitmap_get_buffer(bitmap),
 										tbm, bitmap->width, bitmap->height,
 										bitmap->width * 4, AMI_BITMAP_FORMAT);
-		} else {
-			tbm = ami_rtg_allocbitmap(width, height,
-										8, 0, friendbm, AMI_BITMAP_FORMAT);
-			if(tbm == NULL) return NULL;
-
-			if(GuiGFXBase != NULL) {
-				struct RastPort rp;
-				InitRastPort(&rp);
-				rp.BitMap = tbm;
-				ULONG dithermode = DITHERMODE_NONE;
-
-				if(nsoption_int(dither_quality) == 1) {
-					dithermode = DITHERMODE_EDD;
-				} else if(nsoption_int(dither_quality) == 2) {
-					dithermode = DITHERMODE_FS;
-				}
-
-				ami_bitmap_rgba_to_argb(bitmap);
-				bitmap->drawhandle = ObtainDrawHandle(
-					NULL,
-					&rp,
-					scrn->ViewPort.ColorMap,
-					GGFX_DitherMode, dithermode,
-					TAG_DONE);
-				if(bitmap->drawhandle) {
-					APTR ddh = CreateDirectDrawHandle(bitmap->drawhandle,
-											bitmap->width, bitmap->height,
-											width, height, NULL);
-
-					DirectDrawTrueColor(ddh, (ULONG *)amiga_bitmap_get_buffer(bitmap), 0, 0, TAG_DONE);
-					DeleteDirectDrawHandle(ddh);
-					ReleaseDrawHandle(bitmap->drawhandle);
-					bitmap->drawhandle = NULL;
-				}
-				ami_bitmap_argb_to_rgba(bitmap);
-			} else {
-				if(guigfx_warned == false) {
-					amiga_warn_user("BMConvErr", NULL);
-					guigfx_warned = true;
-				}
-			}
 		}
 
 		if(((type == AMI_NSBM_TRUECOLOUR) && (nsoption_int(cache_bitmaps) == 2)) ||
@@ -562,21 +580,16 @@ static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
 				(bitmap->height == height) && (nsoption_int(cache_bitmaps) == 2)) ||
 				(nsoption_int(cache_bitmaps) >= 1)))) {
 			bitmap->nativebm = tbm;
-			if(type == AMI_NSBM_TRUECOLOUR) {
-				bitmap->nativebmwidth = bitmap->width;
-				bitmap->nativebmheight = bitmap->height;
-			} else {
-				bitmap->nativebmwidth = width;
-				bitmap->nativebmheight = height;
-			}
+			bitmap->nativebmwidth = bitmap->width;
+			bitmap->nativebmheight = bitmap->height;
 			bitmap->native = type;
 		}
-
-		if(type == AMI_NSBM_PALETTEMAPPED)
-			return tbm;
 	}
 
 	if((bitmap->width != width) || (bitmap->height != height)) {
+		if((bitmap->nativebmwidth == width) && (bitmap->nativebmheight == height))
+			return bitmap->nativebm;
+
 		struct BitMap *restrict scaledbm;
 		struct BitScaleArgs bsa;
 		int depth = 32;
@@ -662,6 +675,7 @@ static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
 			bitmap->nativebmwidth = width;
 			bitmap->nativebmheight = height;
 			bitmap->native = type;
+			bitmap->bg = bg;
 		}
 	}
 
@@ -670,13 +684,13 @@ static inline struct BitMap *ami_bitmap_get_generic(struct bitmap *bitmap,
 
 
 static inline struct BitMap *ami_bitmap_get_truecolour(struct bitmap *bitmap,
-			int width, int height, struct BitMap *friendbm)
+			int width, int height, struct BitMap *friendbm, colour bg)
 {
 	if((bitmap->native != AMI_NSBM_NONE) && (bitmap->native != AMI_NSBM_TRUECOLOUR)) {
 		amiga_bitmap_modified(bitmap);
 	}
 
-	return ami_bitmap_get_generic(bitmap, width, height, friendbm, AMI_NSBM_TRUECOLOUR);
+	return ami_bitmap_get_generic(bitmap, width, height, friendbm, AMI_NSBM_TRUECOLOUR, bg);
 }
 
 PLANEPTR ami_bitmap_get_mask(struct bitmap *bitmap, int width,
@@ -698,7 +712,7 @@ PLANEPTR ami_bitmap_get_mask(struct bitmap *bitmap, int width,
 
 	for(y=0; y<height; y++) {
 		for(x=0; x<width; x++) {
-			if ((*bmi & 0x000000ffU) <= (ULONG)nsoption_int(mask_alpha)) maskbit = 0;
+			if ((*bmi & 0xff000000U) <= (ULONG)nsoption_int(mask_alpha)) maskbit = 0;
 				else maskbit = 1;
 			bmi++;
 			bitmap->native_mask[(y*bpr) + (x/8)] |=
@@ -710,24 +724,24 @@ PLANEPTR ami_bitmap_get_mask(struct bitmap *bitmap, int width,
 }
 
 static inline struct BitMap *ami_bitmap_get_palettemapped(struct bitmap *bitmap,
-					int width, int height, struct BitMap *friendbm)
+					int width, int height, struct BitMap *friendbm, colour bg)
 {
 	if((bitmap->native != AMI_NSBM_NONE) && (bitmap->native != AMI_NSBM_PALETTEMAPPED)) {
 		amiga_bitmap_modified(bitmap);
 	}
 
-	return ami_bitmap_get_generic(bitmap, width, height, friendbm, AMI_NSBM_PALETTEMAPPED);
+	return ami_bitmap_get_generic(bitmap, width, height, friendbm, AMI_NSBM_PALETTEMAPPED, bg);
 }
 
-struct BitMap *ami_bitmap_get_native(struct bitmap *bitmap,
-				int width, int height, bool palette_mapped, struct BitMap *friendbm)
+struct BitMap *ami_bitmap_get_native(struct bitmap *bitmap, int width, int height,
+					bool palette_mapped, struct BitMap *friendbm, colour bg)
 {
 	if(bitmap == NULL) return NULL;
 
 	if(__builtin_expect(palette_mapped == true, 0)) {
-		return ami_bitmap_get_palettemapped(bitmap, width, height, friendbm);
+		return ami_bitmap_get_palettemapped(bitmap, width, height, friendbm, bg);
 	} else {
-		return ami_bitmap_get_truecolour(bitmap, width, height, friendbm);
+		return ami_bitmap_get_truecolour(bitmap, width, height, friendbm, bg);
 	}
 }
 
@@ -739,7 +753,6 @@ void ami_bitmap_fini(void)
 
 static nserror bitmap_render(struct bitmap *bitmap, struct hlcache_handle *content)
 {
-#ifdef __amigaos4__
 	NSLOG(netsurf, INFO, "Entering bitmap_render");
 
 	int plot_width;
@@ -762,29 +775,14 @@ static nserror bitmap_render(struct bitmap *bitmap, struct hlcache_handle *conte
 
 	content_scaled_redraw(content, plot_width, plot_height, &ctx);
 
-	BltBitMapTags(	BLITA_SrcX, 0,
-					BLITA_SrcY, 0,
-					BLITA_Width, bitmap->width,
-					BLITA_Height, bitmap->height,
-					BLITA_Source, ami_plot_ra_get_bitmap(bm_globals),
-					BLITA_SrcType, BLITT_BITMAP,
-					BLITA_Dest, amiga_bitmap_get_buffer(bitmap),
-					BLITA_DestType, BLITT_ARGB32,
-					BLITA_DestBytesPerRow, 4 * bitmap->width,
-					BLITA_DestX, 0,
-					BLITA_DestY, 0,
-					TAG_DONE);
-
-	ami_bitmap_argb_to_rgba(bitmap);
+	ami_rtg_readpixelarray(ami_plot_ra_get_bitmap(bm_globals), &bitmap->pixdata,
+							bitmap->width, bitmap->height, 4 * bitmap->width, AMI_BITMAP_FORMAT);
 
 	/**\todo In theory we should be able to move the bitmap to our native area
 		to try to avoid re-conversion (at the expense of memory) */
 
 	ami_plot_ra_free(bm_globals);
 	amiga_bitmap_set_opaque(bitmap, true);
-#else
-#warning FIXME for OS3 (in current state none of bitmap_render can work!)
-#endif
 
 	return NSERROR_OK;
 }
@@ -824,13 +822,10 @@ static struct gui_bitmap_table bitmap_table = {
 	.destroy = amiga_bitmap_destroy,
 	.set_opaque = amiga_bitmap_set_opaque,
 	.get_opaque = amiga_bitmap_get_opaque,
-	.test_opaque = amiga_bitmap_test_opaque,
 	.get_buffer = amiga_bitmap_get_buffer,
 	.get_rowstride = amiga_bitmap_get_rowstride,
 	.get_width = bitmap_get_width,
 	.get_height = bitmap_get_height,
-	.get_bpp = bitmap_get_bpp,
-	.save = amiga_bitmap_save,
 	.modified = amiga_bitmap_modified,
 	.render = bitmap_render,
 };

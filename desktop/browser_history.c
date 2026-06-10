@@ -106,7 +106,7 @@ browser_window_history__clone_entry(struct history *history,
 		new_entry->page.bitmap = guit->bitmap->create(
 				LOCAL_HISTORY_WIDTH,
 				LOCAL_HISTORY_HEIGHT,
-				BITMAP_NEW | BITMAP_OPAQUE);
+				BITMAP_OPAQUE);
 
 		if (new_entry->page.bitmap != NULL) {
 			bmsrc_data = guit->bitmap->get_buffer(entry->page.bitmap);
@@ -129,9 +129,7 @@ browser_window_history__clone_entry(struct history *history,
 		new_child = browser_window_history__clone_entry(history, child);
 		if (new_child == NULL) {
 			nsurl_unref(new_entry->page.url);
-			if (new_entry->page.frag_id) {
-				lwc_string_unref(new_entry->page.frag_id);
-			}
+			lwc_string_unref(new_entry->page.frag_id);
 			free(new_entry->page.title);
 			if (entry->page.bitmap != NULL) {
 				guit->bitmap->destroy(entry->page.bitmap);
@@ -172,9 +170,7 @@ static void browser_window_history__free_entry(struct history_entry *entry)
 		browser_window_history__free_entry(entry->next);
 
 		nsurl_unref(entry->page.url);
-		if (entry->page.frag_id) {
-			lwc_string_unref(entry->page.frag_id);
-		}
+		lwc_string_unref(entry->page.frag_id);
 		free(entry->page.title);
 		if (entry->page.bitmap != NULL) {
 			guit->bitmap->destroy(entry->page.bitmap);
@@ -388,7 +384,7 @@ browser_window_history_add(struct browser_window *bw,
 
 	entry->page.bitmap = guit->bitmap->create(
 			LOCAL_HISTORY_WIDTH, LOCAL_HISTORY_HEIGHT,
-			BITMAP_NEW | BITMAP_CLEAR_MEMORY | BITMAP_OPAQUE);
+			BITMAP_CLEAR | BITMAP_OPAQUE);
 	if (entry->page.bitmap != NULL) {
 		ret = guit->bitmap->render(entry->page.bitmap, content);
 		if (ret != NSERROR_OK) {

@@ -382,12 +382,26 @@ static gchar* nsgtk_download_time_to_string(gint seconds)
 
 static void nsgtk_download_store_update_item(struct gui_download_window *dl)
 {
-	gchar *info = nsgtk_download_info_to_string(dl);
-	char *human = human_friendly_bytesize(dl->speed);
-	char speed[strlen(human) + SLEN("/s") + 1];
-	sprintf(speed, "%s/s", human);
-	gchar *time = nsgtk_download_time_to_string(dl->time_remaining);
-	gboolean pulse = dl->status == NSGTK_DOWNLOAD_WORKING;
+	gchar *info;
+	char *speed;
+	gchar *time;
+	gboolean pulse;
+
+	info = nsgtk_download_info_to_string(dl);
+
+	/* setup the speed text */
+	if (dl->speed == 0) {
+		speed = strdup("-");
+	} else {
+		size_t speedsize;
+		char *human;
+		human = human_friendly_bytesize(dl->speed);
+		speedsize = strlen(human) + SLEN("/s") + 1;
+		speed = malloc(speedsize);
+		snprintf(speed, speedsize, "%s/s", human);
+	}
+	time = nsgtk_download_time_to_string(dl->time_remaining);
+	pulse = dl->status == NSGTK_DOWNLOAD_WORKING;
 
 	/* Updates iter (which is needed to set and get data) with the dl row */
 	gtk_tree_model_get_iter(GTK_TREE_MODEL(dl_ctx.store),
@@ -398,13 +412,14 @@ static void nsgtk_download_store_update_item(struct gui_download_window *dl)
 			   NSGTK_DOWNLOAD_PULSE, pulse ? dl->progress : -1,
 			   NSGTK_DOWNLOAD_PROGRESS, pulse ? 0 : dl->progress,
 			   NSGTK_DOWNLOAD_INFO, info,
-			   NSGTK_DOWNLOAD_SPEED, dl->speed == 0 ? "-" : speed,
+			   NSGTK_DOWNLOAD_SPEED, speed,
 			   NSGTK_DOWNLOAD_REMAINING, time,
 			   NSGTK_DOWNLOAD, dl,
 			   -1);
 
 	g_free(info);
 	g_free(time);
+	free(speed);
 }
 
 
@@ -432,7 +447,7 @@ static gboolean nsgtk_download_update(gboolean force_update)
 		switch (dl->status) {
 		case NSGTK_DOWNLOAD_WORKING:
 			pulse_mode = TRUE;
-			/* Fall through */
+			fallthrough;
 
 		case NSGTK_DOWNLOAD_NONE:
 			dl->speed = dl->size_downloaded /
@@ -449,12 +464,13 @@ static gboolean nsgtk_download_update(gboolean force_update)
 
 			dl_ctx.num_active++;
 			update = TRUE;
-			/* Fall through */
+			fallthrough;
 
 		case NSGTK_DOWNLOAD_COMPLETE:
 			downloaded += dl->size_downloaded;
 			total += dl->size_total;
 			dls++;
+			fallthrough;
 
 		default:
 			;//Do nothing
@@ -609,13 +625,13 @@ nsgtk_download_dialog_show(const gchar *filename,
 	info = g_strdup_printf(messages_get("gtkInfo"), filename, domain, size);
 
 	dialog = gtk_message_dialog_new_with_markup(
-				dl_ctx.parent,
-				GTK_DIALOG_DESTROY_WITH_PARENT,
-				GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
-				"<span size=\"x-large\" weight=\"ultrabold\">%s</span>"
-				"\n\n<small>%s</small>",
-				message,
-				info);
+		dl_ctx.parent,
+		GTK_DIALOG_DESTROY_WITH_PARENT,
+		GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
+		"<span size=\"x-large\" weight=\"ultrabold\">%s</span>"
+		"\n\n<small>%s</small>",
+		message,
+		info);
 
 	gtk_dialog_add_buttons(GTK_DIALOG(dialog),
 			       NSGTK_STOCK_SAVE, GTK_RESPONSE_DOWNLOAD,
@@ -631,12 +647,12 @@ nsgtk_download_dialog_show(const gchar *filename,
 	switch (result) {
 	case GTK_RESPONSE_SAVE_AS: {
 		dialog = gtk_file_chooser_dialog_new(
-				messages_get("gtkSave"),
-				dl_ctx.parent,
-				GTK_FILE_CHOOSER_ACTION_SAVE,
-				NSGTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
-				NSGTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
-				NULL);
+			messages_get("gtkSave"),
+			dl_ctx.parent,
+			GTK_FILE_CHOOSER_ACTION_SAVE,
+			NSGTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+			NSGTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
+			NULL);
 		gtk_file_chooser_set_current_name
 			(GTK_FILE_CHOOSER(dialog), filename);
 		gtk_file_chooser_set_current_folder
@@ -654,14 +670,16 @@ nsgtk_download_dialog_show(const gchar *filename,
 		break;
 	}
 	case GTK_RESPONSE_DOWNLOAD: {
-		destination = malloc(strlen(nsoption_charp(downloads_directory))
-				     + strlen(filename) + SLEN("/") + 1);
+		size_t destsize;
+		destsize = strlen(nsoption_charp(downloads_directory)) +
+			SLEN("/") + strlen(filename) + 1;
+		destination = malloc(destsize);
 		if (destination == NULL) {
 			nsgtk_warning(messages_get("NoMemory"), 0);
 			break;
 		}
-		sprintf(destination, "%s/%s",
-			nsoption_charp(downloads_directory), filename);
+		snprintf(destination, destsize, "%s/%s",
+			 nsoption_charp(downloads_directory), filename);
 		/* Test if file already exists and display overwrite
 		 * confirmation if needed */
 		if (g_file_test(destination, G_FILE_TEST_EXISTS) &&
@@ -674,28 +692,30 @@ nsgtk_download_dialog_show(const gchar *filename,
 					       nsoption_charp(downloads_directory));
 
 			dialog = gtk_message_dialog_new_with_markup(
-						dl_ctx.parent,
-						GTK_DIALOG_DESTROY_WITH_PARENT,
-						GTK_MESSAGE_QUESTION,
-						GTK_BUTTONS_CANCEL,
-						"<b>%s</b>",
-						message);
+				dl_ctx.parent,
+				GTK_DIALOG_DESTROY_WITH_PARENT,
+				GTK_MESSAGE_QUESTION,
+				GTK_BUTTONS_CANCEL,
+				"<b>%s</b>",
+				message);
 			gtk_message_dialog_format_secondary_markup(
-						GTK_MESSAGE_DIALOG(dialog),
-						"%s",
-						info);
+				GTK_MESSAGE_DIALOG(dialog),
+				"%s",
+				info);
 
 			button = gtk_dialog_add_button(GTK_DIALOG(dialog),
 						       "_Replace",
 						       GTK_RESPONSE_DOWNLOAD);
 			gtk_button_set_image(GTK_BUTTON(button),
 					     nsgtk_image_new_from_stock(
-							NSGTK_STOCK_SAVE,
-							GTK_ICON_SIZE_BUTTON));
+						     NSGTK_STOCK_SAVE,
+						     GTK_ICON_SIZE_BUTTON));
 
 			gint result = gtk_dialog_run(GTK_DIALOG(dialog));
-			if (result == GTK_RESPONSE_CANCEL)
+			if (result == GTK_RESPONSE_CANCEL) {
+				free(destination);
 				destination = NULL;
+			}
 
 			gtk_widget_destroy(dialog);
 			g_free(message);
@@ -867,8 +887,9 @@ gui_download_window_data(struct gui_download_window *dw,
 			 const char *data,
 			 unsigned int size)
 {
-	g_io_channel_write_chars(dw->write, data, size, NULL, &dw->error);
-	if (dw->error != NULL) {
+	GIOStatus status;
+	status = g_io_channel_write_chars(dw->write, data, size, NULL, &dw->error);
+	if (status != G_IO_STATUS_NORMAL || dw->error != NULL) {
 		dw->speed = 0;
 		dw->time_remaining = -1;
 
@@ -1022,7 +1043,7 @@ nserror nsgtk_download_init(void)
 
 
 /* exported interface documented in gtk/download.h */
-void nsgtk_download_destroy ()
+void nsgtk_download_destroy(void)
 {
 	nsgtk_download_do(nsgtk_download_store_cancel_item);
 }

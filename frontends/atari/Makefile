@@ -12,6 +12,19 @@ STRIP := $(wildcard $(GCCSDK_INSTALL_CROSSBIN)/*-strip)
 STACK := $(wildcard $(GCCSDK_INSTALL_CROSSBIN)/*stack)
 FT2CF := $(GCCSDK_INSTALL_ENV)/bin/freetype-config
 
+# Compute default atariarch: 68020-60 unless coldfire
+ifeq ($(origin ATARIARCH),undefined)
+  ifeq (,$(findstring m5475,$(shell $(CC) -dumpmachine 2>/dev/null)))
+    ATARIARCH := 68020-60
+  else
+    ATARIARCH := v4e
+  endif
+endif
+# Validate atariarch
+ifeq ($(filter 68000 68020-60 v4e,$(ATARIARCH)),)
+  $(error Unknown ATARIARCH "$(ATARIARCH)")
+endif
+
 ifeq ($(ATARIARCH),68000)
 PRGSUFFIX := 000.app
 PKGNAME := ns000.zip
@@ -161,7 +174,7 @@ $(ATARI_FONT_TMP_DIR)$(ATARI_FONT_NAME):
 package-atari: $(ATARI_FONT_TMP_DIR)$(ATARI_FONT_NAME) $(PKGNAME)
 	$(VQ)echo Creating $(PKGNAME)
 
-$(PKGNAME): $(EXETARGET)
+$(PKGNAME): $(EXETARGET) $(POSTEXES)
 ifneq ($(strip $(STRIP)),)
 	$(Q)echo Stripping symbols from $(EXETARGET) with $(STRIP)
 	$(Q)$(STRIP) $(EXETARGET)

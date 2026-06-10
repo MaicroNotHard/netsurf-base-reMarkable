@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 - 2016 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2008 - 2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -41,7 +41,9 @@
 
 static plot_font_style_t *prev_fstyle = NULL;
 static struct TextFont *prev_font = NULL;
+static struct RastPort *prev_rp = NULL;
 static struct RastPort temp_rp;
+static UBYTE style_set = 0;
 
 static struct TextFont *ami_font_bm_open(struct RastPort *rp, const plot_font_style_t *fstyle)
 {
@@ -49,14 +51,6 @@ static struct TextFont *ami_font_bm_open(struct RastPort *rp, const plot_font_st
 	struct TextAttr tattr;
 	char *fontname;
 	char font[MAX_FONT_NAME_SIZE];
-
-	if((prev_fstyle != NULL) && (prev_font != NULL) &&
-		(fstyle->family == prev_fstyle->family) &&
-		(fstyle->size == prev_fstyle->size) &&
-		(fstyle->flags == prev_fstyle->flags) &&
-		(fstyle->weight == prev_fstyle->weight)) {
-		return prev_font;
-	}
 
 	if(rp == NULL) return NULL;
 
@@ -95,20 +89,40 @@ static struct TextFont *ami_font_bm_open(struct RastPort *rp, const plot_font_st
 	if (fstyle->weight >= 700)
 		tattr.ta_Style |= FSF_BOLD;
 
+	if((prev_fstyle != NULL) && (prev_font != NULL) &&
+		(fstyle->family == prev_fstyle->family) &&
+		(fstyle->size == prev_fstyle->size)) {
+			 if(rp != prev_rp) {
+				 /* We have the correct font open, but it isn't set here */
+				 SetRPAttrs(rp, RPTAG_Font, prev_font, TAG_DONE);
+				 prev_rp = rp;
+			 }
+			/* Current font is correct, just SoftStyle it */
+			NSLOG(netsurf, INFO, "Applying SoftStyle to current font");
+			SetSoftStyle(rp, tattr.ta_Style, style_set);
+			return prev_font;
+	}
+
 	snprintf(font, MAX_FONT_NAME_SIZE, "%s.font", fontname);
 	tattr.ta_Name = font;
-	tattr.ta_YSize = fstyle->size / PLOT_STYLE_SCALE;
+	ULONG fsize = fstyle->size * nsoption_int(screen_ydpi) / 72;
+	tattr.ta_YSize = fsize / PLOT_STYLE_SCALE;
 	NSLOG(netsurf, INFO, "font: %s/%d", tattr.ta_Name, tattr.ta_YSize);
 
-	if(prev_font != NULL) CloseFont(prev_font);
+	if(prev_font != NULL) {
+		CloseFont(prev_font);
+		prev_font = NULL;
+	}
 
 	if((bmfont = OpenDiskFont(&tattr))) {
 		SetRPAttrs(rp, RPTAG_Font, bmfont, TAG_DONE);
-	}
-
-	if(prev_fstyle != NULL) {
-		memcpy(prev_fstyle, fstyle, sizeof(plot_font_style_t));
+		style_set = AskSoftStyle(rp);
+		prev_rp = rp;
 		prev_font = bmfont;
+
+		if(prev_fstyle != NULL) {
+			memcpy(prev_fstyle, fstyle, sizeof(plot_font_style_t));
+		}
 	}
 
 	return bmfont;
@@ -300,7 +314,14 @@ void ami_font_diskfont_init(void)
 
 void ami_font_diskfont_fini(void)
 {
-	if(prev_font != NULL) CloseFont(prev_font);
-	if(prev_fstyle != NULL) free(prev_fstyle);
+	if(prev_font != NULL) {
+		CloseFont(prev_font);
+		prev_font = NULL;
+	}
+
+	if(prev_fstyle != NULL) {
+		free(prev_fstyle);
+		prev_fstyle = NULL;
+	}
 }
 

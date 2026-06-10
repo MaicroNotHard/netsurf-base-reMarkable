@@ -75,7 +75,7 @@ gui_window_create(struct browser_window *bw,
 		  struct gui_window *existing,
 		  gui_window_create_flags flags)
 {
-	struct gui_window *ret = calloc(sizeof(*ret), 1);
+	struct gui_window *ret = calloc(1, sizeof(*ret));
 	if (ret == NULL)
 		return NULL;
 
@@ -631,7 +631,7 @@ monkey_window_handle_exec(int argc, char **argv)
 		moutf(MOUT_ERROR, "WINDOW NUM BAD");
 	} else {
 		/* Gather argv[4] onward into a string to pass to js_exec */
-		int total = 0;
+		int total = 1;
 		for (int i = 4; i < argc; ++i) {
 			total += strlen(argv[i]) + 1;
 		}
@@ -640,11 +640,19 @@ monkey_window_handle_exec(int argc, char **argv)
 			moutf(MOUT_ERROR, "JS WIN %d RET ENOMEM", atoi(argv[2]));
 			return;
 		}
-		strcpy(cmd, argv[4]);
-		for (int i = 5; i < argc; ++i) {
-			strcat(cmd, " ");
-			strcat(cmd, argv[i]);
+		char *cmdcur = cmd; /* string cursor */
+
+		for (int argi = 4; argi < argc; ++argi) {
+			int argl;
+			argl = strlen(argv[argi]);
+			memcpy(cmdcur, argv[argi], argl);
+			cmdcur+=argl;
+			*cmdcur = ' ';
+			cmdcur++;
 		}
+		cmdcur--;
+		*cmdcur = 0;
+
 		/* Now execute the JS */
 
 		moutf(MOUT_WINDOW, "JS WIN %d RET %s", atoi(argv[2]),

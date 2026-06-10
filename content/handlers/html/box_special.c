@@ -560,8 +560,18 @@ static bool
 box_input_text(html_content *html, struct box *box, struct dom_node *node)
 {
 	struct box *inline_container, *inline_box;
+	uint8_t display = css_computed_display_static(box->style);
 
-	box->type = BOX_INLINE_BLOCK;
+	switch (display) {
+	case CSS_DISPLAY_GRID:
+	case CSS_DISPLAY_FLEX:
+	case CSS_DISPLAY_BLOCK:
+		box->type = BOX_BLOCK;
+		break;
+	default:
+		box->type = BOX_INLINE_BLOCK;
+		break;
+	}
 
 	inline_container = box_create(NULL, 0, false, 0, 0, 0, 0, html->bctx);
 	if (!inline_container)
@@ -705,9 +715,7 @@ box_a(dom_node *n,
 		if (err == DOM_NO_ERR) {
 			/* name replaces existing id
 			 * TODO: really? */
-			if (box->id != NULL)
-				lwc_string_unref(box->id);
-
+			lwc_string_unref(box->id);
 			box->id = lwc_name;
 		}
 	}
@@ -825,8 +833,8 @@ box_canvas(dom_node *n,
 	}
 	*convert_children = false;
 
-	if (box->style &&
-	    ns_computed_display(box->style, box_is_root(n)) == CSS_DISPLAY_NONE)
+	if (box->style && ns_computed_display(box->style,
+			box_is_root(n)) == CSS_DISPLAY_NONE)
 		return true;
 
 	/* This is replaced content */
@@ -854,8 +862,8 @@ box_embed(dom_node *n,
 	dom_string *src;
 	dom_exception err;
 
-	if (box->style &&
-	    ns_computed_display(box->style, box_is_root(n)) == CSS_DISPLAY_NONE)
+	if (box->style && ns_computed_display(box->style,
+			box_is_root(n)) == CSS_DISPLAY_NONE)
 		return true;
 
 	params = talloc(content->bctx, struct object_params);
@@ -1025,8 +1033,8 @@ box_iframe(dom_node *n,
 	struct content_html_iframe *iframe;
 	int i;
 
-	if (box->style &&
-	    ns_computed_display(box->style, box_is_root(n)) == CSS_DISPLAY_NONE)
+	if (box->style && ns_computed_display(box->style,
+			box_is_root(n)) == CSS_DISPLAY_NONE)
 		return true;
 
 	if (box->style &&
@@ -1154,8 +1162,8 @@ box_image(dom_node *n,
 	css_unit wunit = CSS_UNIT_PX;
 	css_unit hunit = CSS_UNIT_PX;
 
-	if (box->style &&
-	    ns_computed_display(box->style, box_is_root(n)) == CSS_DISPLAY_NONE)
+	if (box->style && ns_computed_display(box->style,
+			box_is_root(n)) == CSS_DISPLAY_NONE)
 		return true;
 
 	/* handle alt text */
@@ -1322,10 +1330,9 @@ box_input(dom_node *n,
 						   corestring_lwc_image)) {
 		gadget->type = GADGET_IMAGE;
 
-		if (box->style &&
-		    ns_computed_display(box->style,
+		if (box->style && ns_computed_display(box->style,
 				box_is_root(n)) != CSS_DISPLAY_NONE &&
-		    nsoption_bool(foreground_images) == true) {
+				nsoption_bool(foreground_images) == true) {
 			dom_string *s;
 
 			err = dom_element_get_attribute(n, corestring_dom_src, &s);
@@ -1405,8 +1412,8 @@ box_object(dom_node *n,
 	dom_node *c;
 	dom_exception err;
 
-	if (box->style &&
-	    ns_computed_display(box->style, box_is_root(n)) == CSS_DISPLAY_NONE)
+	if (box->style && ns_computed_display(box->style,
+			box_is_root(n)) == CSS_DISPLAY_NONE)
 		return true;
 
 	if (box_get_attribute(n, "usemap", content->bctx, &box->usemap) ==

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2017-2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -79,6 +79,7 @@
 #include "amiga/theme.h"
 #include "amiga/utf8.h"
 #include "amiga/schedule.h"
+#include "amiga/version.h"
 
 #ifdef __amigaos4__
 static struct Menu *restrict gui_menu = NULL;
@@ -88,9 +89,6 @@ struct ami_menu_data *gui_menu_data[AMI_MENU_AREXX_MAX + 1];
 
 static bool ami_menu_check_toggled = false;
 static bool menu_quit = false;
-
-const char * const netsurf_version;
-const char * const verdate;
 
 static nserror ami_menu_scan(struct ami_menu_data **md);
 void ami_menu_arexx_scan(struct ami_menu_data **md);
@@ -375,6 +373,18 @@ HOOKF(void, ami_menu_item_browser_enablejs, APTR, window, struct IntuiMessage *)
 	ami_gui_menu_set_check_toggled();
 }
 
+HOOKF(void, ami_menu_item_browser_enablecss, APTR, window, struct IntuiMessage *)
+{
+	struct Menu *menustrip;
+	bool checked = false;
+
+	GetAttr(WINDOW_MenuStrip, (Object *)window, (ULONG *)&menustrip);
+	checked = ami_menu_get_selected(menustrip, msg);
+	
+	nsoption_set_bool(author_level_css, checked);
+	ami_gui_menu_set_check_toggled();
+}
+
 HOOKF(void, ami_menu_item_browser_scale_decrease, APTR, window, struct IntuiMessage *)
 {
 	struct gui_window_2 *gwin;
@@ -448,17 +458,6 @@ HOOKF(void, ami_menu_item_hotlist_entries, APTR, window, struct IntuiMessage *)
 HOOKF(void, ami_menu_item_settings_edit, APTR, window, struct IntuiMessage *)
 {
 	ami_gui_opts_open();
-}
-
-HOOKF(void, ami_menu_item_settings_snapshot, APTR, window, struct IntuiMessage *)
-{
-	struct gui_window_2 *gwin;
-	GetAttr(WINDOW_UserData, (Object *)window, (ULONG *)&gwin);
-
-	nsoption_set_int(window_x, ami_gui2_get_window(gwin)->LeftEdge);
-	nsoption_set_int(window_y, ami_gui2_get_window(gwin)->TopEdge);
-	nsoption_set_int(window_width, ami_gui2_get_window(gwin)->Width);
-	nsoption_set_int(window_height, ami_gui2_get_window(gwin)->Height);
 }
 
 HOOKF(void, ami_menu_item_settings_save, APTR, window, struct IntuiMessage *)
@@ -582,6 +581,10 @@ ULONG ami_gui_menu_number(int item)
 		case M_JS:
 			menu_num = FULLMENUNUM(2,9,0);
 		break;
+		
+		case M_CSS:
+			menu_num = FULLMENUNUM(2,10,0);
+		break;
 
 		default:
 			NSLOG(netsurf, INFO,
@@ -689,6 +692,13 @@ void ami_gui_menu_update_checked(struct gui_window_2 *gwin)
 	} else {
 		if(ItemAddress(menustrip, ami_gui_menu_number(M_JS))->Flags & CHECKED)
 			ItemAddress(menustrip, ami_gui_menu_number(M_JS))->Flags ^= CHECKED;
+	}
+	if(nsoption_bool(author_level_css) == true) {
+		if((ItemAddress(menustrip, ami_gui_menu_number(M_CSS))->Flags & CHECKED) == 0)
+			ItemAddress(menustrip, ami_gui_menu_number(M_CSS))->Flags ^= CHECKED;
+	} else {
+		if(ItemAddress(menustrip, ami_gui_menu_number(M_CSS))->Flags & CHECKED)
+			ItemAddress(menustrip, ami_gui_menu_number(M_CSS))->Flags ^= CHECKED;
 	}
 	if(nsoption_bool(foreground_images) == true) {
 		if((ItemAddress(menustrip, ami_gui_menu_number(M_IMGFORE))->Flags & CHECKED) == 0)
@@ -919,6 +929,10 @@ static void ami_init_menulabs(struct ami_menu_data **md)
 	if(nsoption_bool(enable_javascript) == true)
 		js_flags |= CHECKED;
 
+	UWORD css_flags = CHECKIT | MENUTOGGLE;
+	if(nsoption_bool(author_level_css) == true)
+		css_flags |= CHECKED;
+
 	UWORD imgfore_flags = CHECKIT | MENUTOGGLE;
 	if(nsoption_bool(foreground_images) == true)
 		imgfore_flags |= CHECKED;
@@ -1007,6 +1021,8 @@ static void ami_init_menulabs(struct ami_menu_data **md)
 			ami_menu_item_browser_backimg, NULL, imgback_flags);
 	ami_menu_alloc_item(md, M_JS,       NM_ITEM, "EnableJS",     NULL, NULL,
 			ami_menu_item_browser_enablejs, NULL, js_flags);
+	ami_menu_alloc_item(md, M_CSS,       NM_ITEM, "EnableCSS",     NULL, NULL,
+			ami_menu_item_browser_enablecss, NULL, css_flags);
 	ami_menu_alloc_item(md, M_BAR_B4,   NM_ITEM, NM_BARLABEL,    NULL, NULL, NULL, NULL, 0);
 	ami_menu_alloc_item(md, M_REDRAW,   NM_ITEM, "Redraw",       NULL, "TBImages:list_wand",
 			ami_menu_item_browser_redraw, NULL, 0);
@@ -1018,8 +1034,6 @@ static void ami_init_menulabs(struct ami_menu_data **md)
 	ami_menu_alloc_item(md, M_PREDIT,   NM_ITEM, "SettingsEdit", NULL, "TBImages:list_prefs",
 			ami_menu_item_settings_edit, NULL, 0);
 	ami_menu_alloc_item(md, M_BAR_S1,   NM_ITEM, NM_BARLABEL,    NULL, NULL, NULL, NULL, 0);
-	ami_menu_alloc_item(md, M_SNAPSHOT, NM_ITEM, "SnapshotWindow",NULL, "TBImages:list_hold",
-			ami_menu_item_settings_snapshot, NULL, 0);
 	ami_menu_alloc_item(md, M_PRSAVE,   NM_ITEM, "SettingsSave", NULL, "TBImages:list_use",
 			ami_menu_item_settings_save, NULL, 0);
 

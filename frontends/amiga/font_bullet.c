@@ -554,6 +554,7 @@ static inline int32 ami_font_plot_glyph(struct OutlineFont *ofont, struct RastPo
 	FIXED kern = 0;
 	ULONG glyphmaptag;
 	ULONG template_type;
+	bool skip_c2 = false;
 	uint32 long_char_1 = 0, long_char_2 = 0;
 #ifndef __amigaos4__
 	struct BulletBase *BulletBase = ofont->BulletBase;
@@ -569,6 +570,11 @@ static inline int32 ami_font_plot_glyph(struct OutlineFont *ofont, struct RastPo
 		/* Don't attempt to kern a UTF-16 surrogate */
 		*char2 = 0;
 	}
+#endif
+
+	if (*char2 < 0x0020) skip_c2 = true;
+#ifndef __amigaos4__
+	if(*char1 == 0x0020) return (emwidth / 3);
 #endif
 
 #ifdef __amigaos4__
@@ -633,7 +639,7 @@ static inline int32 ami_font_plot_glyph(struct OutlineFont *ofont, struct RastPo
 
 			kern = 0;
 
-			if(*char2) EObtainInfo(AMI_OFONT_ENGINE,
+			if((*char2) && (!skip_c2)) EObtainInfo(AMI_OFONT_ENGINE,
 								OT_TextKernPair, &kern,
 								TAG_END);
 
@@ -643,7 +649,7 @@ static inline int32 ami_font_plot_glyph(struct OutlineFont *ofont, struct RastPo
 				glyphmaptag, glyph,
 				TAG_END);
 				
-			if(*char2) EReleaseInfo(AMI_OFONT_ENGINE,
+			if((*char2) && (!skip_c2)) EReleaseInfo(AMI_OFONT_ENGINE,
 				OT_TextKernPair, kern,
 				TAG_END);
 		}
@@ -679,6 +685,9 @@ static inline int32 ami_font_width_glyph(struct OutlineFont *ofont,
 #endif
 
 	if (*char2 < 0x0020) skip_c2 = true;
+#ifndef __amigaos4__
+	if(*char1 == 0x0020) return (emwidth / 3);
+#endif
 
 	long_char_1 = amiga_nsfont_decode_surrogate(char1);
 	/**\todo use OT_GlyphCode_32 so we get an error for old font engines */

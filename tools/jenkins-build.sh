@@ -51,14 +51,26 @@ ATARIARCH=68020-60
 # make tool
 MAKE=make
 
-# NetSurf version number haiku needs it for package name
-NETSURF_VERSION="3.11"
+# should the "latest" link be updated
+UPDATE_LATEST=yes
+
+# number of retries for scp commands
+SCP_DEFAULT_RETRIES=5
+
+# number of retries for ssh commands
+SSH_DEFAUT_RETRIES=5
+
+# use rsync instead of scp
+USE_RSYNC=0
 
 # Ensure the combination of target and toolchain works and set build
 #   specific parameters too
 case ${TARGET} in
     "riscos")
 	case ${HOST} in
+	    "arm-riscos-gnueabi")
+		UPDATE_LATEST=no
+		;;
 	    "arm-unknown-riscos")
 		;;
 
@@ -69,13 +81,28 @@ case ${TARGET} in
 
 	esac
 
+	export GCCSDK_INSTALL_ENV=/opt/netsurf/${HOST}/env
+	export GCCSDK_INSTALL_CROSSBIN=/opt/netsurf/${HOST}/cross/bin
+	IDENTIFIER="${HOST}-${IDENTIFIER}"
+	OLD_IDENTIFIER="${HOST}-${OLD_IDENTIFIER}"
 	PKG_SRC=netsurf
 	PKG_SFX=.zip
 	;;
 
     "haiku")
+	# NetSurf version number haiku needs it for package name
+	NETSURF_VERSION="3.12"
+	USE_RSYNC=1
+
 	case ${HOST} in
 	    "i586-pc-haiku")
+	    # 32bit x86 (gcc) abi
+		PKG_SRC="netsurf_x86-${NETSURF_VERSION}-1-x86_gcc2"
+		;;
+
+	    "x86_64-unknown-haiku")
+		# 64bit x86 (gcc) abi
+		PKG_SRC="netsurf-${NETSURF_VERSION}-1-x86_64"
 		;;
 
 	    *)
@@ -85,7 +112,8 @@ case ${TARGET} in
 
 	esac
 
-	PKG_SRC="netsurf_x86-${NETSURF_VERSION}-1-x86_gcc2"
+	IDENTIFIER="${HOST}-${IDENTIFIER}"
+	OLD_IDENTIFIER="${HOST}-${OLD_IDENTIFIER}"
 	PKG_SFX=.hpkg
 	;;
 
@@ -260,6 +288,39 @@ case ${TARGET} in
 	;;
 
 
+    "qt")
+	case ${HOST} in
+	    "x86_64-linux-gnu")
+		;;
+
+	    "arm-linux-gnueabihf")
+		;;
+
+	    "aarch64-linux-gnu")
+		;;
+
+	    amd64-unknown-openbsd*)
+		MAKE=gmake
+		;;
+
+	    x86_64-unknown-freebsd*)
+		MAKE=gmake
+		;;
+
+	    *)
+		echo "Target \"${TARGET}\" cannot be built on \"${HOST}\""
+		exit 1
+		;;
+
+	esac
+
+	IDENTIFIER="${HOST}-${IDENTIFIER}"
+	OLD_IDENTIFIER="${HOST}-${OLD_IDENTIFIER}"
+	PKG_SRC=nsqt
+	PKG_SFX=
+	;;
+
+
     "framebuffer")
 	case ${HOST} in
 	    "x86_64-linux-gnu")
@@ -283,6 +344,11 @@ case ${TARGET} in
 
 	    x86_64-unknown-freebsd*)
 		MAKE=gmake
+		;;
+
+	    "arm-riscos-gnueabi")
+		export GCCSDK_INSTALL_ENV=/opt/netsurf/${HOST}/env
+		export GCCSDK_INSTALL_CROSSBIN=/opt/netsurf/${HOST}/cross/bin
 		;;
 
 	    "arm-unknown-riscos")
@@ -339,6 +405,11 @@ case ${TARGET} in
 
 	    x86_64-unknown-freebsd*)
 		MAKE=gmake
+		;;
+
+	    "arm-riscos-gnueabi")
+		export GCCSDK_INSTALL_ENV=/opt/netsurf/${HOST}/env
+		export GCCSDK_INSTALL_CROSSBIN=/opt/netsurf/${HOST}/cross/bin
 		;;
 
 	    "arm-unknown-riscos")
@@ -441,7 +512,7 @@ ${MAKE} -j ${PARALLEL} -k CI_BUILD=${BUILD_NUMBER} ATARIARCH=${ATARIARCH} Q=
 ${MAKE} -k CI_BUILD=${BUILD_NUMBER} ATARIARCH=${ATARIARCH} PACKAGER="NetSurf Developers <support@netsurf-browser.org>" Q= package
 
 if [ ! -f "${PKG_SRC}${PKG_SFX}" ]; then
-    # unable to find package file
+    echo "unable to find package file:${PKG_SRC}${PKG_SFX}"
     exit 1
 fi
 
@@ -463,6 +534,54 @@ ${SHAR256SUM} "${PKG_SRC}${PKG_SFX}" > ${PKG_SRC}.sha256
 
 ############ Package artifact deployment ################
 
+# retry_scp <src> <destination>
+# scp but retries with backoff if command fails
+retry_scp()
+{
+    scp_retries=${SCP_DEFAULT_RETRIES}
+    scp_backoff=10
+    scp_res=0
+    if [ ${USE_RSYNC} -ne 0 ]; then
+	rsync -avzPh -e"ssh" "${1}" "${2}" || scp_res=$?
+    else
+	scp "${1}" "${2}" || scp_res=$?
+    fi
+
+    while [ ${scp_res} -ne 0 -a ${scp_retries} -gt 1 ]; do
+	scp_retries=$(( ${scp_retries} - 1 ))
+	scp_delay=$(( ( ${SCP_DEFAULT_RETRIES} - ${scp_retries} ) * ${scp_backoff} ))
+	echo "Retrying scp in ${scp_delay} seconds"
+	sleep ${scp_delay}
+        scp_res=0
+	if [ ${USE_RSYNC} -ne 0 ]; then
+	    rsync -avzPh -e"ssh" "${1}" "${2}" || scp_res=$?
+	else
+	    scp "${1}" "${2}" || scp_res=$?
+	fi
+    done
+
+    return ${scp_res}
+}
+
+# retry_ssh <destination> <command>
+# retry ssh command until success or timeout
+retry_ssh()
+{
+    ssh_retries=${SSH_DEFAUT_RETRIES}
+    ssh_backoff=10
+    ssh_res=0
+    ssh "${1}" "${2}" || ssh_res=$?
+    while [ ${ssh_res} -ne 0 -a ${ssh_retries} -gt 1 ]; do
+	ssh_retries=$(( ${ssh_retries} - 1 ))
+	ssh_delay=$(( ( ${SSH_DEFAUT_RETRIES} - ${ssh_retries} ) * ${ssh_backoff} ))
+	echo "Retrying ssh in ${ssh_delay} seconds"
+	sleep ${ssh_delay}
+        ssh_res=0
+	ssh "${1}" "${2}" || ssh_res=$?
+    done
+    return ${ssh_res}
+}
+
 #destination for package artifacts
 DESTDIR=/srv/ci.netsurf-browser.org/html/builds/${TARGET}/
 
@@ -471,7 +590,7 @@ OLD_ARTIFACT_TARGETS=""
 
 for SUFFIX in "${PKG_SFX}" .md5 .sha256;do
     # copy the file to the output - always use scp as it works local or remote
-    scp "${PKG_SRC}${SUFFIX}" netsurf@ci.netsurf-browser.org:${DESTDIR}/${NEW_ARTIFACT_TARGET}${SUFFIX}
+    retry_scp "${PKG_SRC}${SUFFIX}" "netsurf@ci.netsurf-browser.org:${DESTDIR}/${NEW_ARTIFACT_TARGET}${SUFFIX}"
 
     # remove the local file artifact
     rm -f "${PKG_SRC}${SUFFIX}"
@@ -483,4 +602,7 @@ done
 ############ Expired package artifact removal and latest linking ##############
 
 
-ssh netsurf@ci.netsurf-browser.org "rm -f ${OLD_ARTIFACT_TARGETS} ${DESTDIR}/LATEST && echo "${NEW_ARTIFACT_TARGET}${PKG_SFX}" > ${DESTDIR}/LATEST"
+retry_ssh netsurf@ci.netsurf-browser.org "rm -f ${OLD_ARTIFACT_TARGETS}"
+if [ ${UPDATE_LATEST} = "yes" ]; then
+    retry_ssh netsurf@ci.netsurf-browser.org "rm -f ${DESTDIR}/LATEST && echo "${NEW_ARTIFACT_TARGET}${PKG_SFX}" > ${DESTDIR}/LATEST"
+fi

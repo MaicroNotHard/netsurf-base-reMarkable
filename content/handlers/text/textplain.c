@@ -100,10 +100,8 @@ static lwc_string *textplain_default_charset;
  */
 static void textplain_fini(void)
 {
-	if (textplain_default_charset != NULL) {
-		lwc_string_unref(textplain_default_charset);
-		textplain_default_charset = NULL;
-	}
+	lwc_string_unref(textplain_default_charset);
+	textplain_default_charset = NULL;
 }
 
 
@@ -264,7 +262,7 @@ textplain_drain_input(textplain_content *c,
 		      parserutils_inputstream *stream,
 		      parserutils_error terminator)
 {
-	static const uint8_t *u_fffd = (const uint8_t *) "\xef\xbf\xfd";
+	static const uint8_t *u_fffd = (const uint8_t *) "\xef\xbf\xbd";
 	const uint8_t *ch;
 	size_t chlen, offset = 0;
 

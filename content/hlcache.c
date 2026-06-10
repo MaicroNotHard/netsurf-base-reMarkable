@@ -30,6 +30,7 @@
 #include "utils/messages.h"
 #include "utils/ring.h"
 #include "utils/utils.h"
+#include "netsurf/inttypes.h"
 #include "netsurf/misc.h"
 #include "netsurf/content.h"
 #include "desktop/gui_internal.h"
@@ -458,8 +459,7 @@ hlcache_llcache_callback(llcache_handle *handle,
 			 * prohibited, we must migrate the retrieval context. */
 			error = hlcache_migrate_ctx(ctx, effective_type);
 
-			if (effective_type != NULL)
-				lwc_string_unref(effective_type);
+			lwc_string_unref(effective_type);
 		}
 
 		/* No need to report that we need data:
@@ -495,10 +495,7 @@ hlcache_llcache_callback(llcache_handle *handle,
 		if (error == NSERROR_OK || error == NSERROR_NOT_FOUND) {
 			error = hlcache_migrate_ctx(ctx, effective_type);
 
-			if (effective_type != NULL) {
-				lwc_string_unref(effective_type);
-			}
-
+			lwc_string_unref(effective_type);
 			return error;
 		}
 
@@ -592,7 +589,7 @@ void hlcache_finalise(void)
 		num_contents++;
 	}
 
-	NSLOG(netsurf, INFO, "%d contents remain before cache drain",
+	NSLOG(netsurf, INFO, "%"PRIu32" contents remain before cache drain",
 	      num_contents);
 
 	/* Drain cache */
@@ -607,7 +604,8 @@ void hlcache_finalise(void)
 		}
 	} while (num_contents > 0 && num_contents != prev_contents);
 
-	NSLOG(netsurf, INFO, "%d contents remaining after being polite", num_contents);
+	NSLOG(netsurf, INFO, "%"PRIu32" contents remaining after being polite",
+			num_contents);
 
 	/* Drain cache again, forcing the matter */
 	do {
@@ -621,12 +619,12 @@ void hlcache_finalise(void)
 		}
 	} while (num_contents > 0 && num_contents != prev_contents);
 
-	NSLOG(netsurf, INFO, "%d contents remaining:", num_contents);
+	NSLOG(netsurf, INFO, "%"PRIu32" contents remaining:", num_contents);
 	for (entry = hlcache->content_list; entry != NULL; entry = entry->next) {
 		hlcache_handle entry_handle = { entry, NULL, NULL };
 
 		if (entry->content != NULL) {
-			NSLOG(netsurf, INFO, "	%p : %s (%d users)",
+			NSLOG(netsurf, INFO, "	%p : %s (%"PRIu32" users)",
 			      entry,
 			      nsurl_access(hlcache_handle_get_url(&entry_handle)),
 			      content_count_users(entry->content));
@@ -824,7 +822,7 @@ nserror hlcache_handle_abort(hlcache_handle *handle)
 		if (clone == NULL)
 			return NSERROR_NOMEM;
 
-		entry = calloc(sizeof(struct hlcache_entry), 1);
+		entry = calloc(1, sizeof(struct hlcache_entry));
 
 		if (entry == NULL) {
 			content_destroy(clone);

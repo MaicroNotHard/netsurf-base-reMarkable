@@ -673,15 +673,22 @@ nsgtk_toolbar_customisation_save(struct nsgtk_toolbar *tb)
 	for (location = BACK_BUTTON;
 	     location < PLACEHOLDER_BUTTON;
 	     location++) {
+		int written;
 		itemid = itemid_from_location(tb, location);
 		if (itemid == PLACEHOLDER_BUTTON) {
 			/* no more filled locations */
 			break;
 		}
-		start += snprintf(start,
+		written = snprintf(start,
 				orderlen - (start - order),
 				"%s/",
 				tb->items[itemid].name);
+		if ((written < 0) ||
+		    (written >= orderlen - (start - order))) {
+			free(order);
+			return NSERROR_UNKNOWN;
+		}
+		start += written;
 
 		if ((start - order) >= orderlen) {
 			break;
@@ -2130,6 +2137,7 @@ openfile_button_clicked_cb(GtkWidget *widget, gpointer data)
 
 	response = gtk_dialog_run(GTK_DIALOG(dlgOpen));
 	if (response == GTK_RESPONSE_OK) {
+		size_t urltxt_size;
 		char *urltxt;
 		gchar *filename;
 		nserror res;
@@ -2137,9 +2145,10 @@ openfile_button_clicked_cb(GtkWidget *widget, gpointer data)
 
 		filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dlgOpen));
 
-		urltxt = malloc(strlen(filename) + FILE_SCHEME_PREFIX_LEN + 1);
+		urltxt_size = strlen(filename) + FILE_SCHEME_PREFIX_LEN + 1;
+		urltxt = malloc(urltxt_size);
 		if (urltxt != NULL) {
-			sprintf(urltxt, FILE_SCHEME_PREFIX"%s", filename);
+			snprintf(urltxt, urltxt_size, FILE_SCHEME_PREFIX"%s", filename);
 
 			res = nsurl_create(urltxt, &url);
 			if (res == NSERROR_OK) {
@@ -2846,17 +2855,16 @@ debugboxtree_button_clicked_cb(GtkWidget *widget, gpointer data)
 		nsgtk_warning("Error saving box tree dump.",
 			      "Unable to open file for writing.");
 		unlink(fname);
-		return TRUE;
+
+	} else {
+		bw = tb->get_bw(tb->get_ctx);
+
+		browser_window_debug_dump(bw, f, CONTENT_DEBUG_RENDER);
+
+		fclose(f);
+
+		nsgtk_viewfile("Box Tree Debug", "boxtree", fname);
 	}
-
-	bw = tb->get_bw(tb->get_ctx);
-
-	browser_window_debug_dump(bw, f, CONTENT_DEBUG_RENDER);
-
-	fclose(f);
-
-	nsgtk_viewfile("Box Tree Debug", "boxtree", fname);
-
 	g_free(fname);
 
 	return TRUE;
@@ -2891,17 +2899,16 @@ debugdomtree_button_clicked_cb(GtkWidget *widget, gpointer data)
 		nsgtk_warning("Error saving box tree dump.",
 			      "Unable to open file for writing.");
 		unlink(fname);
-		return TRUE;
+
+	} else {
+		bw = tb->get_bw(tb->get_ctx);
+
+		browser_window_debug_dump(bw, f, CONTENT_DEBUG_DOM);
+
+		fclose(f);
+
+		nsgtk_viewfile("DOM Tree Debug", "domtree", fname);
 	}
-
-	bw = tb->get_bw(tb->get_ctx);
-
-	browser_window_debug_dump(bw, f, CONTENT_DEBUG_DOM);
-
-	fclose(f);
-
-	nsgtk_viewfile("DOM Tree Debug", "domtree", fname);
-
 	g_free(fname);
 
 	return TRUE;
@@ -3066,7 +3073,7 @@ contents_button_clicked_cb(GtkWidget *widget, gpointer data)
 	struct nsgtk_toolbar *tb = (struct nsgtk_toolbar *)data;
 	nserror res;
 
-	res = toolbar_navigate_to_url(tb, "http://www.netsurf-browser.org/documentation/");
+	res = toolbar_navigate_to_url(tb, "https://www.netsurf-browser.org/documentation/");
 	if (res != NSERROR_OK) {
 		nsgtk_warning(messages_get_errorcode(res), 0);
 	}
@@ -3087,7 +3094,7 @@ guide_button_clicked_cb(GtkWidget *widget, gpointer data)
 	struct nsgtk_toolbar *tb = (struct nsgtk_toolbar *)data;
 	nserror res;
 
-	res = toolbar_navigate_to_url(tb, "http://www.netsurf-browser.org/documentation/guide");
+	res = toolbar_navigate_to_url(tb, "https://www.netsurf-browser.org/documentation/guide");
 	if (res != NSERROR_OK) {
 		nsgtk_warning(messages_get_errorcode(res), 0);
 	}
@@ -3109,7 +3116,7 @@ info_button_clicked_cb(GtkWidget *widget, gpointer data)
 	struct nsgtk_toolbar *tb = (struct nsgtk_toolbar *)data;
 	nserror res;
 
-	res = toolbar_navigate_to_url(tb, "http://www.netsurf-browser.org/documentation/info");
+	res = toolbar_navigate_to_url(tb, "https://www.netsurf-browser.org/documentation/info");
 	if (res != NSERROR_OK) {
 		nsgtk_warning(messages_get_errorcode(res), 0);
 	}

@@ -42,6 +42,7 @@ extern "C" {
 #include "utils/messages.h"
 #include "utils/utils.h"
 #include "utils/ring.h"
+#include "netsurf/inttypes.h"
 #include "content/fetch.h"
 #include "content/fetchers.h"
 }
@@ -206,8 +207,8 @@ static bool fetch_rsrc_process(struct fetch_rsrc_context *c)
 		}
 	}
 
-	NSLOG(netsurf, INFO, "fetch_rsrc: 0x%08lx, %ld, '%s'\n", type, id,
-	      c->name);
+	NSLOG(netsurf, INFO, "fetch_rsrc: 0x%08" PRIx32 ", %" PRId32 ", '%s'\n",
+	      type, id, c->name);
 
 	bool found;
 	if (id)
@@ -281,7 +282,7 @@ static void fetch_rsrc_poll(lwc_string *scheme)
 		if (!c->aborted && fetch_rsrc_process(c) == true) {
 			char header[64];
 
-			fetch_set_http_code(c->parent_fetch, 200);
+			fetch_set_http_code(c->parent_fetch, HTTP_RESPONSE_OK);
 			NSLOG(netsurf, INFO,
 			      "setting rsrc: MIME type to %s, length to %zd",
 			      c->mimetype,

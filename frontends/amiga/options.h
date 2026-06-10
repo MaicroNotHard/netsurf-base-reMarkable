@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 - 2020 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2008 - 2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -37,8 +37,6 @@ NSOPTION_BOOL(clipboard_write_utf8, false)
 NSOPTION_BOOL(truecolour_mouse_pointers, false)
 NSOPTION_BOOL(os_mouse_pointers, true)
 NSOPTION_BOOL(use_openurl_lib, false)
-NSOPTION_BOOL(new_tab_is_active, false)
-NSOPTION_BOOL(new_tab_last, false)
 NSOPTION_BOOL(tab_close_warn, true)
 NSOPTION_BOOL(tab_always_show, false)
 NSOPTION_BOOL(tab_new_session, false) /* When NetSurf is already running, open new tab */
@@ -68,18 +66,6 @@ NSOPTION_BOOL(font_unicode_only, false)
 NSOPTION_BOOL(font_antialiasing, true)
 NSOPTION_BOOL(bitmap_fonts, false)
 NSOPTION_BOOL(drag_save_icons, true)
-NSOPTION_INTEGER(hotlist_window_xpos, 0)
-NSOPTION_INTEGER(hotlist_window_ypos, 0)
-NSOPTION_INTEGER(hotlist_window_xsize, 0)
-NSOPTION_INTEGER(hotlist_window_ysize, 0)
-NSOPTION_INTEGER(history_window_xpos, 0)
-NSOPTION_INTEGER(history_window_ypos, 0)
-NSOPTION_INTEGER(history_window_xsize, 0)
-NSOPTION_INTEGER(history_window_ysize, 0)
-NSOPTION_INTEGER(cookies_window_xpos, 0)
-NSOPTION_INTEGER(cookies_window_ypos, 0)
-NSOPTION_INTEGER(cookies_window_xsize, 0)
-NSOPTION_INTEGER(cookies_window_ysize, 0)
 NSOPTION_INTEGER(web_search_width, 0)
 NSOPTION_BOOL(window_simple_refresh, true)
 NSOPTION_BOOL(resize_with_contents, false)
@@ -102,9 +88,18 @@ NSOPTION_INTEGER(local_codeset, 0)
 /* Use ExtMem */
 NSOPTION_BOOL(use_extmem, true)
 
+/* Don't invert alpha channel (guigfx) */
+NSOPTION_BOOL(invert_alpha, false)
+
 #else
 /** Options relevant for OS3 only **/
 
 NSOPTION_BOOL(friend_bitmap, false)
+
+/* Invert alpha channel (guigfx)
+ * Workaround for guigfx/render bug
+ */
+NSOPTION_BOOL(invert_alpha, true)
+
 #endif
 

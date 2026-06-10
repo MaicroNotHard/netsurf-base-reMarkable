@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2017-2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -199,13 +199,13 @@ ami_history_local_create_window(struct ami_history_local_window *history_local_w
 	}
 
 	ami_cw->objects[GID_CW_WIN] = WindowObj,
-  	    WA_ScreenTitle, ami_gui_get_screen_title(),
-       	WA_Title, ami_cw->wintitle,
-       	WA_Activate, TRUE,
-       	WA_DepthGadget, TRUE,
-       	WA_DragBar, TRUE,
-       	WA_CloseGadget, TRUE,
-       	WA_SizeGadget, TRUE,
+		WA_ScreenTitle, ami_gui_get_screen_title(),
+		WA_Title, ami_cw->wintitle,
+		WA_Activate, TRUE,
+		WA_DepthGadget, TRUE,
+		WA_DragBar, TRUE,
+		WA_CloseGadget, TRUE,
+		WA_SizeGadget, TRUE,
 		WA_SizeBRight, TRUE,
 		WA_Width, 100,
 		WA_Height, 100,
@@ -225,12 +225,18 @@ ami_history_local_create_window(struct ami_history_local_window *history_local_w
 //		WINDOW_MenuStrip, NULL,
 		WINDOW_MenuUserData, WGUD_HOOK,
 		WINDOW_IconifyGadget, FALSE,
+#ifdef __amigaos4__
+		WINDOW_UniqueID, "NS_HISTORY_LOCAL_WIN",
+		WINDOW_PopupGadget, TRUE,
+#endif
 		WINDOW_Position, WPOS_CENTERSCREEN,
 		WINDOW_ParentGroup, ami_cw->objects[GID_CW_MAIN] = LayoutVObj,
 			LAYOUT_AddChild, ami_cw->objects[GID_CW_DRAW] = SpaceObj,
 				GA_ID, GID_CW_DRAW,
 				SPACE_Transparent, TRUE,
 				SPACE_BevelStyle, BVS_DISPLAY,
+				SPACE_MinWidth, 50,
+				SPACE_MinHeight, 50,
 				GA_RelVerify, TRUE,
    			SpaceEnd,
 		EndGroup,
@@ -293,8 +299,7 @@ nserror ami_history_local_present(struct gui_window *gw)
 		return res;
 	}
 
-	res = local_history_init(ncwin->core.cb_table,
-				 (struct core_window *)ncwin,
+	res = local_history_init((struct core_window *)ncwin,
 				 ami_gui_get_browser_window(gw),
 				 &ncwin->session);
 	if (res != NSERROR_OK) {
@@ -308,11 +313,9 @@ nserror ami_history_local_present(struct gui_window *gw)
 					     &width,
 					     &height);
 
-	/*TODO: Adjust these to account for window borders */
-
 	SetAttrs(ncwin->core.objects[GID_CW_WIN],
-		WA_Width, width,
-		WA_Height, height,
+		WA_InnerWidth, width,
+		WA_InnerHeight, height,
 		TAG_DONE);
 
 	ncwin->gw = gw;

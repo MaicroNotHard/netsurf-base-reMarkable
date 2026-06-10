@@ -16,6 +16,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "amiga/os3support.h"
 
 #include <proto/diskfont.h>
@@ -35,6 +38,8 @@
 static ULONG ami_devicedpi = 72;
 static ULONG ami_xdpi = 72;
 
+struct ami_font_functions *ami_nsfont = NULL;
+
 ULONG ami_font_dpi_get_devicedpi(void)
 {
 	return (ami_xdpi << 16) | ami_devicedpi;
@@ -49,12 +54,6 @@ void ami_font_setdevicedpi(int id)
 {
 	DisplayInfoHandle dih;
 	struct DisplayInfo dinfo;
-
-	if(nsoption_bool(bitmap_fonts) == true) {
-		NSLOG(netsurf, INFO,
-		      "WARNING: Using diskfont.library for text. Forcing DPI to 72.");
-		nsoption_set_int(screen_ydpi, 72);
-	}
 
 	ULONG ydpi = nsoption_int(screen_ydpi);
 	ULONG xdpi = nsoption_int(screen_ydpi);
@@ -113,8 +112,30 @@ void ami_font_close_disk_font(struct TextFont *tfont)
 void ami_font_init(void)
 {
 	if(nsoption_bool(bitmap_fonts) == false) {
+#ifdef __amigaos4__
+		nsoption_setnull_charp(font_sans, (char *)strdup("DejaVu Sans"));
+		nsoption_setnull_charp(font_serif, (char *)strdup("DejaVu Serif"));
+		nsoption_setnull_charp(font_mono, (char *)strdup("DejaVu Sans Mono"));
+		nsoption_setnull_charp(font_cursive, (char *)strdup("DejaVu Sans"));
+		nsoption_setnull_charp(font_fantasy, (char *)strdup("DejaVu Serif"));
+#else
+		/* Default CG fonts for OS3 - these work with use_diskfont both on and off,
+		however they are slow in both cases. The bitmap fonts don't work when
+		use_diskfont is off. */
+		nsoption_setnull_charp(font_sans, (char *)strdup("CGTriumvirate"));
+		nsoption_setnull_charp(font_serif, (char *)strdup("CGTimes"));
+		nsoption_setnull_charp(font_mono, (char *)strdup("LetterGothic"));
+		nsoption_setnull_charp(font_cursive, (char *)strdup("CGTriumvirate"));
+		nsoption_setnull_charp(font_fantasy, (char *)strdup("CGTimes"));
+#endif
 		ami_font_bullet_init();
 	} else {
+		nsoption_setnull_charp(font_sans, (char *)strdup("helvetica"));
+		nsoption_setnull_charp(font_serif, (char *)strdup("times"));
+		nsoption_setnull_charp(font_mono, (char *)strdup("topaz"));
+		nsoption_setnull_charp(font_cursive, (char *)strdup("garnet"));
+		nsoption_setnull_charp(font_fantasy, (char *)strdup("emerald"));
+
 		ami_font_diskfont_init();
 	}
 }

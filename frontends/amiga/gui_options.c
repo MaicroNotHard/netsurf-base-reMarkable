@@ -1,5 +1,5 @@
 /*
- * Copyright 2009 - 2012 Chris Young <chris@unsatisfactorysoftware.co.uk>
+ * Copyright 2009 - 2025 Chris Young <chris@unsatisfactorysoftware.co.uk>
  *
  * This file is part of NetSurf, http://www.netsurf-browser.org/
  *
@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+
 #include <proto/exec.h>
 #include <proto/graphics.h>
 #include <proto/intuition.h>
@@ -66,6 +67,8 @@
 #include "desktop/searchweb.h"
 #include "netsurf/window.h"
 
+#include "amiga/os3support.h"
+#include "amiga/misc.h"
 #include "amiga/file.h"
 #include "amiga/font.h"
 #include "amiga/font_bullet.h"
@@ -94,6 +97,7 @@ enum
 	GID_OPTS_FROMLOCALE,
 	GID_OPTS_HISTORY,
 	GID_OPTS_JAVASCRIPT,
+	GID_OPTS_ENABLECSS,
 	GID_OPTS_REFERRAL,
 	GID_OPTS_DONOTTRACK,
 	GID_OPTS_FASTSCROLL,
@@ -102,6 +106,9 @@ enum
 	GID_OPTS_SCREENNAME,
 	GID_OPTS_WIN_SIMPLE,
 	GID_OPTS_THEME,
+	GID_OPTS_THEMEPAGE,
+	GID_OPTS_DARK,
+	GID_OPTS_LIGHT,
 	GID_OPTS_PTRTRUE,
 	GID_OPTS_PTROS,
 	GID_OPTS_PROXY,
@@ -135,7 +142,6 @@ enum
 	GID_OPTS_DLDIR,
 	GID_OPTS_TAB_ACTIVE,
 	GID_OPTS_TAB_2,
-	GID_OPTS_TAB_LAST,
 	GID_OPTS_TAB_ALWAYS,
 	GID_OPTS_TAB_CLOSE,
 	GID_OPTS_SEARCH_PROV,
@@ -210,6 +216,7 @@ enum
 #define OPTS_LAST LAB_OPTS_LAST
 #define OPTS_MAX_TABS 10
 #define OPTS_MAX_SCREEN 4
+#define OPTS_MAX_THEMEPAGE 3
 #define OPTS_MAX_PROXY 5
 #define OPTS_MAX_NATIVEBM 4
 #define OPTS_MAX_DITHER 4
@@ -227,11 +234,14 @@ struct ami_gui_opts_window {
 #ifndef __amigaos4__
 	struct List clicktablist;
 	struct List screenoptslist;
+	struct List pagethemeoptslist;
 	struct List proxyoptslist;
 	struct List nativebmoptslist;
 	struct List ditheroptslist;
 	struct List fontoptslist;
+	struct List fontenginelist;
 #endif
+	int websearch_idx;
 };
 
 static BOOL ami_gui_opts_event(void *w);
@@ -242,15 +252,53 @@ static const struct ami_win_event_table ami_guiopts_table = {
 	ami_gui_opts_close,
 };
 
+/* Default fonts */
+static struct TextAttr default_bm_font_SANS =    { "helvetica.font", 0, 0, 0 };
+static struct TextAttr default_bm_font_SERIF =   { "times.font",     0, 0, 0 };
+static struct TextAttr default_bm_font_MONO =    { "topaz.font",     0, 0, 0 };
+static struct TextAttr default_bm_font_CURSIVE = { "garnet.font",    0, 0, 0 };
+static struct TextAttr default_bm_font_FANTASY = { "emerald.font",   0, 0, 0 };
+
+#ifdef __amigaos4__
+static struct TextAttr default_cg_font_SANS =    { "DejaVu Sans.font",      0, 0, 0 };
+static struct TextAttr default_cg_font_SERIF =   { "DejaVu Serif.font",     0, 0, 0 };
+static struct TextAttr default_cg_font_MONO =    { "DejaVu Sans Mono.font", 0, 0, 0 };
+static struct TextAttr default_cg_font_CURSIVE = { "DejaVu Sans.font",      0, 0, 0 };
+static struct TextAttr default_cg_font_FANTASY = { "DejaVu Serif.font",     0, 0, 0 };
+#else
+static struct TextAttr default_cg_font_SANS =    { "CGTriumvirate.font", 0, 0, 0 };
+static struct TextAttr default_cg_font_SERIF =   { "CGTimes.font",       0, 0, 0 };
+static struct TextAttr default_cg_font_MONO =    { "LetterGothic.font",  0, 0, 0 };
+static struct TextAttr default_cg_font_CURSIVE = { "CGTriumvirate.font", 0, 0, 0 };
+static struct TextAttr default_cg_font_FANTASY = { "CGTimes.font",       0, 0, 0 };
+#endif
+
+#define AMI_GUI_OPTS_REFRESH_FONT_BM(TYPE) RefreshSetGadgetAttrs((struct Gadget *)gow->objects[GID_OPTS_FONT_##TYPE], \
+								gow->win, NULL, \
+								GETFONT_TextAttr, &default_bm_font_##TYPE, \
+								GETFONT_OTagOnly, FALSE, \
+								GETFONT_ScalableOnly, FALSE, \
+								TAG_DONE)
+
+#define AMI_GUI_OPTS_REFRESH_FONT_CG(TYPE) RefreshSetGadgetAttrs((struct Gadget *)gow->objects[GID_OPTS_FONT_##TYPE], \
+								gow->win, NULL, \
+								GETFONT_TextAttr, &default_cg_font_##TYPE, \
+								GETFONT_OTagOnly, TRUE, \
+								GETFONT_ScalableOnly, TRUE, \
+								TAG_DONE)
+
 static struct ami_gui_opts_window *gow = NULL;
 
 static CONST_STRPTR tabs[OPTS_MAX_TABS];
 static STRPTR screenopts[OPTS_MAX_SCREEN];
+static CONST_STRPTR pagethemeopts[OPTS_MAX_THEMEPAGE];
 static CONST_STRPTR proxyopts[OPTS_MAX_PROXY];
 static CONST_STRPTR nativebmopts[OPTS_MAX_NATIVEBM];
 static CONST_STRPTR ditheropts[OPTS_MAX_DITHER];
 static CONST_STRPTR fontopts[6];
+static CONST_STRPTR fontengines[3];
 static CONST_STRPTR gadlab[OPTS_LAST];
+static CONST_STRPTR helphints[OPTS_LAST];
 static struct List *websearch_list;
 
 #ifndef __amigaos4__
@@ -311,6 +359,23 @@ static void ami_gui_opts_free_list(struct List *list, int type)
 }
 #endif
 
+static void ami_gui_opts_set_default_fonts(struct ami_gui_opts_window *gow, BOOL outline)
+{
+	if(outline) {
+		AMI_GUI_OPTS_REFRESH_FONT_CG(SANS);
+		AMI_GUI_OPTS_REFRESH_FONT_CG(SERIF);
+		AMI_GUI_OPTS_REFRESH_FONT_CG(MONO);
+		AMI_GUI_OPTS_REFRESH_FONT_CG(CURSIVE);
+		AMI_GUI_OPTS_REFRESH_FONT_CG(FANTASY);
+	} else {
+		AMI_GUI_OPTS_REFRESH_FONT_BM(SANS);
+		AMI_GUI_OPTS_REFRESH_FONT_BM(SERIF);
+		AMI_GUI_OPTS_REFRESH_FONT_BM(MONO);
+		AMI_GUI_OPTS_REFRESH_FONT_BM(CURSIVE);
+		AMI_GUI_OPTS_REFRESH_FONT_BM(FANTASY);		
+	}
+}
+
 static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 {
 	tabs[0] = (char *)ami_utf8_easy((char *)messages_get("con_general"));
@@ -333,6 +398,10 @@ static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 	screenopts[2] = (char *)ami_utf8_easy((char *)messages_get("ScreenPublic"));
 	screenopts[3] = NULL;
 
+	pagethemeopts[0] = (char *)ami_utf8_easy((char *)messages_get("Light"));
+	pagethemeopts[1] = (char *)ami_utf8_easy((char *)messages_get("Dark"));
+	pagethemeopts[2] = NULL;
+
 	proxyopts[0] = (char *)ami_utf8_easy((char *)messages_get("ProxyNone"));
 	proxyopts[1] = (char *)ami_utf8_easy((char *)messages_get("ProxyNoAuth"));
 	proxyopts[2] = (char *)ami_utf8_easy((char *)messages_get("ProxyBasic"));
@@ -349,7 +418,12 @@ static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 	ditheropts[2] = (char *)ami_utf8_easy((char *)messages_get("High"));
 	ditheropts[3] = NULL;
 
-	websearch_list = ami_gui_opts_websearch();
+	fontengines[0] = (char *)ami_utf8_easy((char *)messages_get("FontEngineBullet"));
+	fontengines[1] = (char *)ami_utf8_easy((char *)messages_get("FontEngineDiskfont"));
+	fontengines[2] = NULL;
+	
+	gow->websearch_idx = 0;
+	websearch_list = ami_gui_opts_websearch(&gow->websearch_idx);
 
 	gadlab[GID_OPTS_HOMEPAGE] = (char *)ami_utf8_easy((char *)messages_get("HomePageURL"));
 	gadlab[GID_OPTS_HOMEPAGE_DEFAULT] = (char *)ami_utf8_easy((char *)messages_get("HomePageDefault"));
@@ -359,10 +433,15 @@ static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 	gadlab[GID_OPTS_FROMLOCALE] = (char *)ami_utf8_easy((char *)messages_get("LocaleLang"));
 	gadlab[GID_OPTS_HISTORY] = (char *)ami_utf8_easy((char *)messages_get("HistoryAge"));
 	gadlab[GID_OPTS_JAVASCRIPT] = (char *)ami_utf8_easy((char *)messages_get("EnableJS"));
+	gadlab[GID_OPTS_ENABLECSS] = (char *)ami_utf8_easy((char *)messages_get("EnableCSS"));
 	gadlab[GID_OPTS_REFERRAL] = (char *)ami_utf8_easy((char *)messages_get("SendReferer"));
 	gadlab[GID_OPTS_DONOTTRACK] = (char *)ami_utf8_easy((char *)messages_get("DoNotTrack"));
 	gadlab[GID_OPTS_FASTSCROLL] = (char *)ami_utf8_easy((char *)messages_get("FastScrolling"));
 	gadlab[GID_OPTS_WIN_SIMPLE] = (char *)ami_utf8_easy((char *)messages_get("SimpleRefresh"));
+	gadlab[GID_OPTS_THEME] = (char *)ami_utf8_easy((char *)messages_get("ThemeGUI"));
+	gadlab[GID_OPTS_THEMEPAGE] = (char *)ami_utf8_easy((char *)messages_get("ThemePage"));
+	gadlab[GID_OPTS_DARK] = (char *)ami_utf8_easy((char *)messages_get("Dark"));
+	gadlab[GID_OPTS_LIGHT] = (char *)ami_utf8_easy((char *)messages_get("Light"));
 	gadlab[GID_OPTS_PTRTRUE] = (char *)ami_utf8_easy((char *)messages_get("TrueColour"));
 	gadlab[GID_OPTS_PTROS] = (char *)ami_utf8_easy((char *)messages_get("OSPointers"));
 	gadlab[GID_OPTS_PROXY] = (char *)ami_utf8_easy((char *)messages_get("ProxyType"));
@@ -387,7 +466,7 @@ static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 	gadlab[GID_OPTS_FONT_SIZE] = (char *)ami_utf8_easy((char *)messages_get("Default"));
 	gadlab[GID_OPTS_FONT_MINSIZE] = (char *)ami_utf8_easy((char *)messages_get("Minimum"));
 	gadlab[GID_OPTS_FONT_ANTIALIASING] = (char *)ami_utf8_easy((char *)messages_get("FontAntialiasing"));
-	gadlab[GID_OPTS_FONT_BITMAP] = (char *)ami_utf8_easy((char *)messages_get("FontBitmap"));
+	gadlab[GID_OPTS_FONT_BITMAP] = (char *)ami_utf8_easy((char *)messages_get("FontEngine"));
 	gadlab[GID_OPTS_CACHE_MEM] = (char *)ami_utf8_easy((char *)messages_get("Size"));
 	gadlab[GID_OPTS_CACHE_DISC] = (char *)ami_utf8_easy((char *)messages_get("Size"));
 	gadlab[GID_OPTS_OVERWRITE] = (char *)ami_utf8_easy((char *)messages_get("ConfirmOverwrite"));
@@ -395,7 +474,6 @@ static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 	gadlab[GID_OPTS_DLDIR] = (char *)ami_utf8_easy((char *)messages_get("DownloadDir"));
 	gadlab[GID_OPTS_TAB_ACTIVE] = (char *)ami_utf8_easy((char *)messages_get("TabActive"));
 	gadlab[GID_OPTS_TAB_2] = (char *)ami_utf8_easy((char *)messages_get("TabMiddle"));
-	gadlab[GID_OPTS_TAB_LAST] = (char *)ami_utf8_easy((char *)messages_get("TabLast"));
 	gadlab[GID_OPTS_TAB_ALWAYS] = (char *)ami_utf8_easy((char *)messages_get("TabAlways"));
 	gadlab[GID_OPTS_TAB_CLOSE] = (char *)ami_utf8_easy((char *)messages_get("TabClose"));
 	gadlab[GID_OPTS_SEARCH_PROV] = (char *)ami_utf8_easy((char *)messages_get("SearchProvider"));
@@ -455,6 +533,8 @@ static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 	gadlab[GRP_OPTS_SCALING] = (char *)ami_utf8_easy((char *)messages_get("Scaling"));
 	gadlab[GRP_OPTS_APPEARANCE] = (char *)ami_utf8_easy((char *)messages_get("Appearance"));
 	gadlab[GRP_OPTS_ADVANCED] = (char *)ami_utf8_easy((char *)messages_get("con_advanced"));
+	
+	helphints[GID_OPTS_FONT_BITMAP] = (char *)translate_escape_chars((char *)messages_get("HelpPrefsFontBitmap"));
 
 	fontopts[0] = gadlab[GID_OPTS_FONT_SANS];
 	fontopts[1] = gadlab[GID_OPTS_FONT_SERIF];
@@ -462,14 +542,16 @@ static void ami_gui_opts_setup(struct ami_gui_opts_window *gow)
 	fontopts[3] = gadlab[GID_OPTS_FONT_CURSIVE];
 	fontopts[4] = gadlab[GID_OPTS_FONT_FANTASY];
 	fontopts[5] = NULL;
-
+	
 #ifndef __amigaos4__
 	ami_gui_opts_array_to_list(&gow->clicktablist, tabs, NSA_LIST_CLICKTAB);
 	ami_gui_opts_array_to_list(&gow->screenoptslist, screenopts, NSA_LIST_RADIO);
+	ami_gui_opts_array_to_list(&gow->pagethemeoptslist, pagethemeopts, NSA_LIST_CHOOSER);
 	ami_gui_opts_array_to_list(&gow->proxyoptslist, proxyopts, NSA_LIST_CHOOSER);
 	ami_gui_opts_array_to_list(&gow->nativebmoptslist, nativebmopts, NSA_LIST_CHOOSER);
 	ami_gui_opts_array_to_list(&gow->ditheroptslist, ditheropts, NSA_LIST_CHOOSER);
 	ami_gui_opts_array_to_list(&gow->fontoptslist, fontopts, NSA_LIST_CHOOSER);
+	ami_gui_opts_array_to_list(&gow->fontenginelist, fontengines, NSA_LIST_CHOOSER);
 #endif
 }
 
@@ -477,9 +559,11 @@ static void ami_gui_opts_free(struct ami_gui_opts_window *gow)
 {
 	int i;
 
-	for(i = 0; i < OPTS_LAST; i++)
+	for(i = 0; i < OPTS_LAST; i++) {
 		if(gadlab[i]) free((APTR)gadlab[i]);
-
+		if(helphints[i]) ami_utf8_free((APTR)helphints[i]);
+	}
+	
 	for(i = 0; i < OPTS_MAX_TABS; i++)
 		if(tabs[i]) free((APTR)tabs[i]);
 
@@ -497,10 +581,12 @@ static void ami_gui_opts_free(struct ami_gui_opts_window *gow)
 #ifndef __amigaos4__
 	ami_gui_opts_free_list(&gow->clicktablist, NSA_LIST_CLICKTAB);
 	ami_gui_opts_free_list(&gow->screenoptslist, NSA_LIST_RADIO);
+	ami_gui_opts_free_list(&gow->pagethemeoptslist, NSA_LIST_CHOOSER);
 	ami_gui_opts_free_list(&gow->proxyoptslist, NSA_LIST_CHOOSER);
 	ami_gui_opts_free_list(&gow->nativebmoptslist, NSA_LIST_CHOOSER);
 	ami_gui_opts_free_list(&gow->ditheroptslist, NSA_LIST_CHOOSER);
 	ami_gui_opts_free_list(&gow->fontoptslist, NSA_LIST_CHOOSER);
+	ami_gui_opts_free_list(&gow->fontenginelist, NSA_LIST_CHOOSER);
 #endif
 }
 
@@ -609,6 +695,8 @@ void ami_gui_opts_open(void)
 	if(ClickTabBase->lib_Version < 53) {
 		tab_always_show_disabled = TRUE;
 	}
+
+	BOOL outline_fonts = !nsoption_bool(bitmap_fonts);
 
 	fontsans.ta_Name = ASPrintf("%s.font", nsoption_charp(font_sans));
 	fontserif.ta_Name = ASPrintf("%s.font", nsoption_charp(font_serif));
@@ -858,6 +946,23 @@ void ami_gui_opts_open(void)
 										GETFILE_ReadOnly, TRUE,
 										GETFILE_FullFileExpand, FALSE,
 									GetFileEnd,
+									CHILD_Label, LabelObj,
+										LABEL_Text, gadlab[GID_OPTS_THEME],
+									LabelEnd,
+									LAYOUT_AddChild, gow->objects[GID_OPTS_THEMEPAGE] = ChooserObj,
+										GA_ID, GID_OPTS_THEMEPAGE,
+										GA_RelVerify, TRUE,
+										CHOOSER_PopUp, TRUE,
+#ifdef __amigaos4__
+										CHOOSER_LabelArray, pagethemeopts,
+#else
+										CHOOSER_Labels, &gow->pagethemeoptslist,
+#endif
+										CHOOSER_Selected, nsoption_bool(prefer_dark_mode),
+									ChooserEnd,
+									CHILD_Label, LabelObj,
+										LABEL_Text, gadlab[GID_OPTS_THEMEPAGE],
+									LabelEnd,
 								LayoutEnd, // theme
 								CHILD_WeightedHeight, 0,
 								LAYOUT_AddChild, LayoutVObj,
@@ -1084,7 +1189,6 @@ void ami_gui_opts_open(void)
 											INTEGER_Minimum, 20,
 											INTEGER_Maximum, 200,
 											INTEGER_Arrows, TRUE,
-											GA_Disabled, nsoption_bool(bitmap_fonts),
 										IntegerEnd,
 										CHILD_WeightedWidth, 0,
 										CHILD_Label, LabelObj,
@@ -1112,8 +1216,8 @@ void ami_gui_opts_open(void)
 										GA_ID, GID_OPTS_FONT_SANS,
 										GA_RelVerify, TRUE,
 										GETFONT_TextAttr, &fontsans,
-										GETFONT_OTagOnly, TRUE,
-										GETFONT_ScalableOnly, TRUE,
+										GETFONT_OTagOnly, outline_fonts,
+										GETFONT_ScalableOnly, outline_fonts,
 									GetFontEnd,
 									CHILD_Label, LabelObj,
 										LABEL_Text, gadlab[GID_OPTS_FONT_SANS],
@@ -1122,8 +1226,8 @@ void ami_gui_opts_open(void)
 										GA_ID, GID_OPTS_FONT_SERIF,
 										GA_RelVerify, TRUE,
 										GETFONT_TextAttr, &fontserif,
-										GETFONT_OTagOnly, TRUE,
-										GETFONT_ScalableOnly, TRUE,
+										GETFONT_OTagOnly, outline_fonts,
+										GETFONT_ScalableOnly, outline_fonts,
 									GetFontEnd,
 									CHILD_Label, LabelObj,
 										LABEL_Text, gadlab[GID_OPTS_FONT_SERIF],
@@ -1132,8 +1236,8 @@ void ami_gui_opts_open(void)
 										GA_ID, GID_OPTS_FONT_MONO,
 										GA_RelVerify, TRUE,
 										GETFONT_TextAttr, &fontmono,
-										GETFONT_OTagOnly, TRUE,
-										GETFONT_ScalableOnly, TRUE,
+										GETFONT_OTagOnly, outline_fonts,
+										GETFONT_ScalableOnly, outline_fonts,
 										GETFONT_FixedWidthOnly, TRUE,
 									GetFontEnd,
 									CHILD_Label, LabelObj,
@@ -1143,8 +1247,8 @@ void ami_gui_opts_open(void)
 										GA_ID, GID_OPTS_FONT_CURSIVE,
 										GA_RelVerify, TRUE,
 										GETFONT_TextAttr, &fontcursive,
-										GETFONT_OTagOnly, TRUE,
-										GETFONT_ScalableOnly, TRUE,
+										GETFONT_OTagOnly, outline_fonts,
+										GETFONT_ScalableOnly, outline_fonts,
 									GetFontEnd,
 									CHILD_Label, LabelObj,
 										LABEL_Text, gadlab[GID_OPTS_FONT_CURSIVE],
@@ -1153,8 +1257,8 @@ void ami_gui_opts_open(void)
 										GA_ID, GID_OPTS_FONT_FANTASY,
 										GA_RelVerify, TRUE,
 										GETFONT_TextAttr, &fontfantasy,
-										GETFONT_OTagOnly, TRUE,
-										GETFONT_ScalableOnly, TRUE,
+										GETFONT_OTagOnly, outline_fonts,
+										GETFONT_ScalableOnly, outline_fonts,
 									GetFontEnd,
 									CHILD_Label, LabelObj,
 										LABEL_Text, gadlab[GID_OPTS_FONT_FANTASY],
@@ -1230,14 +1334,21 @@ void ami_gui_opts_open(void)
 											GA_Disabled, TRUE,
 #endif
             	    					CheckBoxEnd,
-#ifndef __amigaos4__
-										LAYOUT_AddChild, gow->objects[GID_OPTS_FONT_BITMAP] = CheckBoxObj,
-      	              						GA_ID, GID_OPTS_FONT_BITMAP,
-         	           						GA_RelVerify, TRUE,
-         	           						GA_Text, gadlab[GID_OPTS_FONT_BITMAP],
-         	           						GA_Selected, nsoption_bool(bitmap_fonts),
-            	    					CheckBoxEnd,
+										LAYOUT_AddChild, gow->objects[GID_OPTS_FONT_BITMAP] = ChooserObj,
+											GA_ID, GID_OPTS_FONT_BITMAP,
+											GA_RelVerify, TRUE,
+											GA_HintInfo, helphints[GID_OPTS_FONT_BITMAP],
+											CHOOSER_PopUp, TRUE,
+#ifdef __amigaos4__
+											CHOOSER_LabelArray, fontengines,
+#else
+											CHOOSER_Labels, &gow->fontenginelist,
 #endif
+											CHOOSER_Selected, nsoption_bool(bitmap_fonts),
+										ChooserEnd,
+										CHILD_Label, LabelObj,
+											LABEL_Text, gadlab[GID_OPTS_FONT_BITMAP],
+										LabelEnd,
 									LayoutEnd,
 								LayoutEnd,
 								CHILD_WeightedHeight, 0,
@@ -1314,13 +1425,7 @@ void ami_gui_opts_open(void)
       	              						GA_ID, GID_OPTS_TAB_ACTIVE,
          	        	   					GA_RelVerify, TRUE,
          	     	      					GA_Text, gadlab[GID_OPTS_TAB_ACTIVE],
-         	     	      					GA_Selected, !nsoption_bool(new_tab_is_active),
-            	    					CheckBoxEnd,
-										LAYOUT_AddChild, gow->objects[GID_OPTS_TAB_LAST] = CheckBoxObj,
-      	              						GA_ID, GID_OPTS_TAB_LAST,
-         	           						GA_RelVerify, TRUE,
-         	           						GA_Text, gadlab[GID_OPTS_TAB_LAST],
-         	           						GA_Selected, nsoption_bool(new_tab_last),
+         	     	      					GA_Selected, !nsoption_bool(foreground_new),
             	    					CheckBoxEnd,
 										LAYOUT_AddChild, gow->objects[GID_OPTS_TAB_2] = CheckBoxObj,
       	              						GA_ID, GID_OPTS_TAB_2,
@@ -1439,7 +1544,7 @@ void ami_gui_opts_open(void)
 											GA_RelVerify, TRUE,
 											CHOOSER_PopUp, TRUE,
 											CHOOSER_Labels, websearch_list,
-											CHOOSER_Selected, nsoption_int(search_provider),
+											CHOOSER_Selected, gow->websearch_idx,
 											CHOOSER_MaxLabels, 40,
 										ChooserEnd,
 										CHILD_Label, LabelObj,
@@ -1465,6 +1570,12 @@ void ami_gui_opts_open(void)
 										GA_Text, gadlab[GID_OPTS_SELECTMENU],
 										GA_Selected, !nsoption_bool(core_select_menu),
 										GA_Disabled, !ami_selectmenu_is_safe(),
+           	    					CheckBoxEnd,
+	        	        			LAYOUT_AddChild, gow->objects[GID_OPTS_ENABLECSS] = CheckBoxObj,
+										GA_ID, GID_OPTS_ENABLECSS,
+										GA_RelVerify, TRUE,
+										GA_Text, gadlab[GID_OPTS_ENABLECSS],
+										GA_Selected, nsoption_bool(author_level_css),
            	    					CheckBoxEnd,
 								LayoutEnd, // misc
 								CHILD_WeightedHeight, 0,
@@ -1658,8 +1769,10 @@ void ami_gui_opts_open(void)
 static void ami_gui_opts_use(bool save)
 {
 	ULONG data, id = 0;
+	struct Node *tmp_node = NULL;
 	struct TextAttr *tattr;
 	char *dot;
+	char *label = NULL;
 	bool rescan_fonts = false;
 	bool old_tab_always_show;
 
@@ -1709,7 +1822,16 @@ static void ami_gui_opts_use(bool save)
 	} else {
 		nsoption_set_bool(do_not_track, false);
 	}
-	
+
+	GetAttr(GA_Selected,gow->objects[GID_OPTS_ENABLECSS],(ULONG *)&data);
+	if (data) {
+		nsoption_set_bool(author_level_css, true);
+	} else {
+		nsoption_set_bool(author_level_css, false);
+	}
+
+	ami_gui_menu_set_checked(NULL, M_CSS, nsoption_bool(author_level_css));
+
 	GetAttr(GA_Selected,gow->objects[GID_OPTS_FASTSCROLL],(ULONG *)&data);
 	if (data) {
 		nsoption_set_bool(faster_scroll, true);
@@ -1753,6 +1875,13 @@ static void ami_gui_opts_use(bool save)
 	
 	GetAttr(GETFILE_Drawer,gow->objects[GID_OPTS_THEME],(ULONG *)&data);
 	nsoption_set_charp(theme, (char *)strdup((char *)data));
+
+	GetAttr(CHOOSER_Selected,gow->objects[GID_OPTS_THEMEPAGE],(ULONG *)&data);
+	if(data) {
+		nsoption_set_bool(prefer_dark_mode, true);
+	} else {
+		nsoption_set_bool(prefer_dark_mode, false);
+	}
 
 	GetAttr(GA_Selected,gow->objects[GID_OPTS_PTRTRUE],(ULONG *)&data);
 	if (data) {
@@ -1864,17 +1993,8 @@ static void ami_gui_opts_use(bool save)
 		nsoption_set_bool(font_antialiasing, false);
 	}
 
-#ifndef __amigaos4__
-	GetAttr(GA_Selected, gow->objects[GID_OPTS_FONT_BITMAP], (ULONG *)&data);
+	GetAttr(CHOOSER_Selected, gow->objects[GID_OPTS_FONT_BITMAP], (ULONG *)&data);
 	ami_font_fini();
-
-	if((nsoption_bool(bitmap_fonts) == true) && (data == false)) {
-		nsoption_set_charp(font_sans, (char *)strdup("CGTriumvirate"));
-		nsoption_set_charp(font_serif, (char *)strdup("CGTimes"));
-		nsoption_set_charp(font_mono, (char *)strdup("LetterGothic"));
-		nsoption_set_charp(font_cursive, (char *)strdup("CGTriumvirate"));
-		nsoption_set_charp(font_fantasy, (char *)strdup("CGTimes"));
-	}
 
 	if(data) {
 		nsoption_set_bool(bitmap_fonts, true);
@@ -1882,7 +2002,6 @@ static void ami_gui_opts_use(bool save)
 		nsoption_set_bool(bitmap_fonts, false);
 	}
 	ami_font_init();
-#endif
 
 	GetAttr(INTEGER_Number,gow->objects[GID_OPTS_CACHE_MEM],(ULONG *)&nsoption_int(memory_cache_size));
 	nsoption_set_int(memory_cache_size, nsoption_int(memory_cache_size) * 1048576);
@@ -1914,16 +2033,9 @@ static void ami_gui_opts_use(bool save)
 
 	GetAttr(GA_Selected,gow->objects[GID_OPTS_TAB_ACTIVE],(ULONG *)&data);
 	if (data) {
-		nsoption_set_bool(new_tab_is_active, false);
+		nsoption_set_bool(foreground_new, false);
 	} else {
-		nsoption_set_bool(new_tab_is_active, true);
-	}
-
-	GetAttr(GA_Selected,gow->objects[GID_OPTS_TAB_LAST],(ULONG *)&data);
-	if (data) {
-		nsoption_set_bool(new_tab_last, true);
-	} else {
-		nsoption_set_bool(new_tab_last, false);
+		nsoption_set_bool(foreground_new, true);
 	}
 
 	GetAttr(GA_Selected,gow->objects[GID_OPTS_TAB_2],(ULONG *)&data);
@@ -1952,8 +2064,18 @@ static void ami_gui_opts_use(bool save)
 	if(old_tab_always_show != nsoption_bool(tab_always_show))
 		ami_gui_tabs_toggle_all();
 	
-	GetAttr(CHOOSER_Selected,gow->objects[GID_OPTS_SEARCH_PROV],(ULONG *)&nsoption_int(search_provider));
-	search_web_select_provider(nsoption_int(search_provider));
+#ifdef __amigaos4__
+	GetAttr(CHOOSER_SelectedNode, gow->objects[GID_OPTS_SEARCH_PROV],(ULONG *)&tmp_node);
+	if(tmp_node != NULL) {
+		GetChooserNodeAttrs(tmp_node, CNA_Text, (ULONG *)&label, TAG_DONE);
+		nsoption_set_charp(search_web_provider, strdup((char *)label));
+	}
+#else
+	GetAttr(CHOOSER_Selected, gow->objects[GID_OPTS_SEARCH_PROV],(ULONG *)&gow->websearch_idx);
+	/* TODO: convert back to string, only required OS<3.2 */
+#endif
+	
+	search_web_select_provider(nsoption_charp(search_web_provider));
 
 	GetAttr(GA_Selected,gow->objects[GID_OPTS_CLIPBOARD],(ULONG *)&data);
 	if (data) {
@@ -2076,6 +2198,8 @@ static BOOL ami_gui_opts_event(void *w)
 			break;
 
 			case WMHI_GADGETHELP:
+#if 0
+				/* FIXME: this is firing on OS3.2 and OS4 without HELP being pressed */
 				if((result & WMHI_GADGETMASK) == 0) {
 					/* Pointer not over our window */
 					ami_help_open(AMI_HELP_MAIN, ami_gui_get_screen());
@@ -2083,6 +2207,7 @@ static BOOL ami_gui_opts_event(void *w)
 					/* TODO: Make this sensitive to the tab the user is currently on */
 					ami_help_open(AMI_HELP_PREFS, ami_gui_get_screen());
 				}
+#endif
 			break;
 			
 			case WMHI_GADGETUP:
@@ -2245,12 +2370,16 @@ static BOOL ami_gui_opts_event(void *w)
 						IDoMethod(gow->objects[GID_OPTS_FONT_FANTASY],
 						GFONT_REQUEST,gow->win);
 					break;
-#ifndef __amigaos4__
+
 					case GID_OPTS_FONT_BITMAP:
-						RefreshSetGadgetAttrs((struct Gadget *)gow->objects[GID_OPTS_DPI_Y],
-							gow->win, NULL, GA_Disabled, code, TAG_DONE);
+						GetAttr(CHOOSER_Selected,gow->objects[GID_OPTS_FONT_BITMAP],(ULONG *)&data);
+						if(data) {
+							ami_gui_opts_set_default_fonts(gow, FALSE);
+						} else {
+							ami_gui_opts_set_default_fonts(gow, TRUE);
+						}
 					break;
-#endif
+
 					case GID_OPTS_DLDIR:
 						IDoMethod(gow->objects[GID_OPTS_DLDIR],
 						GFILE_REQUEST,gow->win);
@@ -2262,23 +2391,28 @@ static BOOL ami_gui_opts_event(void *w)
 	return FALSE;
 }
 
-struct List *ami_gui_opts_websearch(void)
+struct List *ami_gui_opts_websearch(int *idx)
 {
 	struct List *list;
 	struct Node *node;
 	const char *name;
+	int i = 0;
 	int iter;
 
 	list = malloc(sizeof(struct List));
 	NewList(list);
 
-	if (nsoption_charp(search_engines_file) == NULL) return list;
-
-	for (iter = search_web_iterate_providers(0, &name);
+	for (iter = search_web_iterate_providers(-1, &name);
 		iter != -1;
 		iter = search_web_iterate_providers(iter, &name)) {
 			node = AllocChooserNode(CNA_Text, name, TAG_DONE);
 			AddTail(list, node);
+			if(idx != NULL) {
+				if((nsoption_charp(search_web_provider)) && (strcmp(name, nsoption_charp(search_web_provider)) == 0)) {
+					*idx = i;
+				}
+			}
+		i++;
 	}
 
 	return list;

@@ -29,13 +29,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include "utils/dirent.h"
-#include "utils/filename.h"
+#include "utils/errors.h"
+#include "utils/file.h"
 #include "utils/log.h"
 #include "utils/utils.h"
+
+#include "riscos/filename.h"
 
 #define FULL_WORD (unsigned int)0xffffffffu
 #define START_PREFIX ('0' + '0' * 10)
@@ -55,7 +59,6 @@ static char filename_directory[256];
 
 static struct directory *filename_create_directory(const char *prefix);
 static bool filename_flush_directory(const char *folder, int depth);
-static bool filename_delete_recursive(char *folder);
 
 /**
  * Request a new, unique, filename.
@@ -98,7 +101,7 @@ const char *filename_request(void)
 
 	i = i % 99;
 
-	snprintf(filename_buffer, sizeof(filename_buffer), "%s%.2i", dir->prefix, i);
+	snprintf(filename_buffer, sizeof(filename_buffer), "%s%.2u", dir->prefix, (unsigned int)i);
 
 	return filename_buffer;
 }
@@ -272,6 +275,8 @@ bool filename_flush_directory(const char *folder, int depth)
 	}
 
 	parent = opendir(folder);
+	if (parent == NULL)
+		return false;
 
 	while ((entry = readdir(parent))) {
 		int written;
@@ -288,7 +293,12 @@ bool filename_flush_directory(const char *folder, int depth)
 			child[sizeof(child) - 1] = '\0';
 		}
 
+#if (defined(HAVE_DIRFD) && defined(HAVE_FSTATAT))
+		if (fstatat(dirfd(parent), entry->d_name, &statbuf,
+				AT_SYMLINK_NOFOLLOW) == -1) {
+#else
 		if (stat(child, &statbuf) == -1) {
+#endif
 			NSLOG(netsurf, INFO, "Unable to stat %s: %s", child,
 			      strerror(errno));
 			continue;
@@ -354,14 +364,20 @@ bool filename_flush_directory(const char *folder, int depth)
 
 		/* delete or recurse */
 		if (del) {
-			if (S_ISDIR(statbuf.st_mode))
-				filename_delete_recursive(child);
-
-			if (remove(child))
-				NSLOG(netsurf, INFO, "Failed to remove '%s'",
-				      child);
-			else
-				changed = true;
+			if (S_ISDIR(statbuf.st_mode)) {
+				changed = (netsurf_recursive_rm(child) ==
+					   NSERROR_OK);
+			} else {
+#if (defined(HAVE_DIRFD) && defined(HAVE_UNLINKAT))
+				if (unlinkat(dirfd(parent), entry->d_name, 0)) {
+#else
+				if (unlink(child)) {
+#endif
+					NSLOG(netsurf, INFO,
+					      "Failed to remove '%s'", child);
+				} else
+					changed = true;
+			}
 		} else {
 			while (filename_flush_directory(child, depth + 1));
 		}
@@ -370,61 +386,6 @@ bool filename_flush_directory(const char *folder, int depth)
 	closedir(parent);
 
 	return changed;
-}
-
-
-/**
- * Recursively deletes the contents of a directory
- *
- * \param folder the directory to delete
- * \return true on success, false otherwise
- */
-bool filename_delete_recursive(char *folder)
-{
-	DIR *parent;
-	struct dirent *entry;
-	char child[256];
-	struct stat statbuf;
-
-	parent = opendir(folder);
-
-	while ((entry = readdir(parent))) {
-		int written;
-
-		/* Ignore '.' and '..' */
-		if (strcmp(entry->d_name, ".") == 0 ||
-				strcmp(entry->d_name, "..") == 0)
-			continue;
-
-		written = snprintf(child, sizeof(child), "%s/%s",
-				folder, entry->d_name);
-		if (written == sizeof(child)) {
-			child[sizeof(child) - 1] = '\0';
-		}
-
-		if (stat(child, &statbuf) == -1) {
-			NSLOG(netsurf, INFO, "Unable to stat %s: %s", child,
-			      strerror(errno));
-			continue;
-		}
-
-		if (S_ISDIR(statbuf.st_mode)) {
-			if (!filename_delete_recursive(child)) {
-				closedir(parent);
-				return false;
-			}
-		}
-
-		if (remove(child)) {
-			NSLOG(netsurf, INFO, "Failed to remove '%s'", child);
-			closedir(parent);
-			return false;
-		}
-	}
-
-	closedir(parent);
-
-	return true;
 }
 
 
@@ -443,7 +404,8 @@ static struct directory *filename_create_directory(const char *prefix)
 	char *last_1, *last_2;
 	int index;
 	struct directory *old_dir, *new_dir, *prev_dir = NULL;
-	char dir_prefix[16];
+#define DIR_PREFIX_LEN 16
+	char dir_prefix[DIR_PREFIX_LEN];
 	int i;
 
 	/* get the lowest unique prefix, or use the provided one */
@@ -456,10 +418,12 @@ static struct directory *filename_create_directory(const char *prefix)
 			prev_dir = old_dir;
 		}
 
-		sprintf(dir_prefix, "%.2i/%.2i/%.2i/",
-				((index >> 12) & 63),
-				((index >> 6) & 63),
-				((index >> 0) & 63));
+		snprintf(dir_prefix,
+			 DIR_PREFIX_LEN,
+			 "%.2i/%.2i/%.2i/",
+			 ((index >> 12) & 63),
+			 ((index >> 6) & 63),
+			 ((index >> 0) & 63));
 
 		prefix = dir_prefix;
 	} else {

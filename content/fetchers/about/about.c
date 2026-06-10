@@ -40,6 +40,7 @@
 #include "utils/corestrings.h"
 #include "utils/utils.h"
 #include "utils/ring.h"
+#include "utils/messages.h"
 
 #include "content/fetch.h"
 #include "content/fetchers.h"
@@ -59,6 +60,7 @@
 #include "query_privacy.h"
 #include "query_timeout.h"
 #include "atestament.h"
+#include "websearch.h"
 
 typedef bool (*fetch_about_handler)(struct fetch_about_context *);
 
@@ -236,13 +238,15 @@ bool fetch_about_srverror(struct fetch_about_context *ctx)
 {
 	nserror res;
 
-	fetch_set_http_code(ctx->fetchh, 500);
+	fetch_set_http_code(ctx->fetchh, HTTP_RESPONSE_INTERNAL_SERVER_ERROR);
 
 	/* content type */
 	if (fetch_about_send_header(ctx, "Content-Type: text/plain"))
 		return false;
 
-	res = fetch_about_ssenddataf(ctx, "Server error 500");
+	res = fetch_about_ssenddataf(ctx, "%s 500 %s",
+				     messages_get("FetchErrorCode"),
+				     messages_get("HTTP500"));
 	if (res != NSERROR_OK) {
 		return false;
 	}
@@ -253,6 +257,20 @@ bool fetch_about_srverror(struct fetch_about_context *ctx)
 }
 
 
+/* exported interface documented in about/private.h */
+bool fetch_about_redirect(struct fetch_about_context *ctx, const char *target)
+{
+	fetch_msg msg;
+
+	/* content is going to return redirect */
+	fetch_set_http_code(ctx->fetchh, HTTP_RESPONSE_FOUND);
+
+	msg.type = FETCH_REDIRECT;
+	msg.data.redirect = target;
+
+	return fetch_about_send_callback(&msg, ctx);
+}
+
 /**
  * Handler to generate about scheme credits page.
  *
@@ -261,17 +279,7 @@ bool fetch_about_srverror(struct fetch_about_context *ctx)
  */
 static bool fetch_about_credits_handler(struct fetch_about_context *ctx)
 {
-	fetch_msg msg;
-
-	/* content is going to return redirect */
-	fetch_set_http_code(ctx->fetchh, 302);
-
-	msg.type = FETCH_REDIRECT;
-	msg.data.redirect = "resource:credits.html";
-
-	fetch_about_send_callback(&msg, ctx);
-
-	return true;
+	return fetch_about_redirect(ctx, "resource:credits.html");
 }
 
 
@@ -283,17 +291,7 @@ static bool fetch_about_credits_handler(struct fetch_about_context *ctx)
  */
 static bool fetch_about_licence_handler(struct fetch_about_context *ctx)
 {
-	fetch_msg msg;
-
-	/* content is going to return redirect */
-	fetch_set_http_code(ctx->fetchh, 302);
-
-	msg.type = FETCH_REDIRECT;
-	msg.data.redirect = "resource:licence.html";
-
-	fetch_about_send_callback(&msg, ctx);
-
-	return true;
+	return fetch_about_redirect(ctx, "resource:licence.html");
 }
 
 
@@ -305,17 +303,7 @@ static bool fetch_about_licence_handler(struct fetch_about_context *ctx)
  */
 static bool fetch_about_logo_handler(struct fetch_about_context *ctx)
 {
-	fetch_msg msg;
-
-	/* content is going to return redirect */
-	fetch_set_http_code(ctx->fetchh, 302);
-
-	msg.type = FETCH_REDIRECT;
-	msg.data.redirect = "resource:netsurf.png";
-
-	fetch_about_send_callback(&msg, ctx);
-
-	return true;
+	return fetch_about_redirect(ctx, "resource:netsurf.png");
 }
 
 
@@ -327,17 +315,7 @@ static bool fetch_about_logo_handler(struct fetch_about_context *ctx)
  */
 static bool fetch_about_welcome_handler(struct fetch_about_context *ctx)
 {
-	fetch_msg msg;
-
-	/* content is going to return redirect */
-	fetch_set_http_code(ctx->fetchh, 302);
-
-	msg.type = FETCH_REDIRECT;
-	msg.data.redirect = "resource:welcome.html";
-
-	fetch_about_send_callback(&msg, ctx);
-
-	return true;
+	return fetch_about_redirect(ctx, "resource:welcome.html");
 }
 
 
@@ -477,6 +455,14 @@ struct about_handlers about_handler_list[] = {
 		NULL,
 		fetch_about_query_fetcherror_handler,
 		true
+	},
+	{
+		/* web search using the configured provider */
+		"websearch",
+		SLEN("websearch"),
+		NULL,
+		fetch_about_websearch_handler,
+		true
 	}
 };
 
@@ -495,10 +481,10 @@ static bool fetch_about_about_handler(struct fetch_about_context *ctx)
 	unsigned int abt_loop = 0;
 
 	/* content is going to return ok */
-	fetch_set_http_code(ctx->fetchh, 200);
+	fetch_set_http_code(ctx->fetchh, HTTP_RESPONSE_OK);
 
 	/* content type */
-	if (fetch_about_send_header(ctx, "Content-Type: text/html"))
+	if (fetch_about_send_header(ctx, "Content-Type: text/html; charset=utf-8"))
 		goto fetch_about_config_handler_aborted;
 
 	res = fetch_about_ssenddataf(ctx,
@@ -546,16 +532,30 @@ static bool
 fetch_about_404_handler(struct fetch_about_context *ctx)
 {
 	nserror res;
+	const char *title;
 
 	/* content is going to return 404 */
-	fetch_set_http_code(ctx->fetchh, 404);
+	fetch_set_http_code(ctx->fetchh, HTTP_RESPONSE_NOT_FOUND);
 
 	/* content type */
-	if (fetch_about_send_header(ctx, "Content-Type: text/plain; charset=utf-8")) {
+	if (fetch_about_send_header(ctx,
+			"Content-Type: text/html; charset=utf-8")) {
 		return false;
 	}
 
-	res = fetch_about_ssenddataf(ctx, "Unknown page: %s", nsurl_access(ctx->url));
+	title = messages_get("HTTP404");
+	res = fetch_about_ssenddataf(ctx,
+		"<html>\n<head>\n"
+		"<title>%s</title>\n"
+		"<link rel=\"stylesheet\" type=\"text/css\" "
+		"href=\"resource:internal.css\">\n"
+		"</head>\n"
+		"<body class=\"ns-even-bg ns-even-fg ns-border\" id =\"fetcherror\">\n"
+		"<h1 class=\"ns-border ns-odd-fg-bad\">%s</h1>\n"
+		"<p>%s %d %s %s</p>\n"
+		"</body>\n</html>\n",
+		title, title, messages_get("FetchErrorCode"), 404,
+		messages_get("FetchFile"),nsurl_access(ctx->url));
 	if (res != NSERROR_OK) {
 		return false;
 	}
@@ -646,8 +646,7 @@ fetch_about_setup(struct fetch *fetchh,
 		}
 	}
 
-	if (path != NULL)
-		lwc_string_unref(path);
+	lwc_string_unref(path);
 
 	ctx->fetchh = fetchh;
 	ctx->url = nsurl_ref(url);

@@ -24,10 +24,10 @@ COMMON_WARNFLAGS += -Wno-multichar
 
 # compiler flags
 CFLAGS += -std=c99 -Dnsbeos -D_BSD_SOURCE -D_POSIX_C_SOURCE -Drestrict="" -g
-CFLAGS += -I$(PREFIX)/include
+CFLAGS += -I$(PREFIX)/include -I/boot/system/develop/headers/private/netservices
 
 CXXFLAGS += -Dnsbeos -D_BSD_SOURCE -D_POSIX_C_SOURCE -Drestrict="" -g
-CXXFLAGS += -I$(PREFIX)/include
+CXXFLAGS += -I$(PREFIX)/include -I/boot/system/develop/headers/private/netservices
 
 VERSION_FULL := $(shell sed -n '/_version.*=.*"/{s/.*"\(.*\)".*/\1/;p;}' desktop/version.c))
 VERSION_MAJ := $(shell sed -n '/_major/{s/.* = \([0-9]*\).*/\1/;p;}' desktop/version.c)
@@ -56,7 +56,7 @@ summary	"A multi-platform web browser"\n\
 description	"Small as a mouse, fast as a cheetah and available for free. NetSurf is a multi-platform web browser for RISC OS, UNIX-like platforms (including Linux), Mac OS X, and more.Whether you want to check your webmail, read the news or post to discussion forums, NetSurf is your lightweight gateway to the world wide web. Actively developed, NetSurf is continually evolving and improving."\n\
 vendor	"NetSurf"\n\
 packager	"$(PACKAGER)"\n\
-copyrights	{\n\t"2003-2018 The NetSurf Browser project"\n}\n\
+copyrights	{\n\t"2003-2025 The NetSurf Browser project"\n}\n\
 licenses	{\n\t"GNU GPL v2"\n}\n\
 urls	{\n\t"http://www.netsurf-browser.org/"\n}\n\
 source-urls	{\n\t"http://download.netsurf-browser.org/netsurf/releases/source/netsurf-$(VERSION_MAJ).$(VERSION_MIN)-src.tar.gz"\n}\n\
@@ -151,7 +151,7 @@ install-beos:
 package-beos: $(PKGNAME)
 	$(VQ)echo Creating $(PKGNAME)
 
-$(PKGNAME): $(EXETARGET)
+$(PKGNAME): $(EXETARGET) $(POSTEXES)
 	$(Q)rm -rf $(HAIKU_TARGET_DIR)
 	$(Q)rm -rf $(PKGNAME)
 	$(Q)$(MKDIR) $(HAIKU_TARGET_DIR)

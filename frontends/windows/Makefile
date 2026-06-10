@@ -15,7 +15,7 @@ $(eval $(call pkg_config_find_and_add,libcares,Cares))
 $(eval $(call pkg_config_find_and_add,zlib,ZLib))
 
 # libraries for windows API
-LDFLAGS += -lgnurx -lgdi32 -lcomctl32 -lws2_32 -lmsimg32 -lshlwapi -lcrypt32 -mwindows
+LDFLAGS += -lgnurx -lgdi32 -lcomctl32 -lws2_32 -lmsimg32 -lshlwapi -liphlpapi -lcrypt32 -mwindows
 
 CFLAGS += -U__STRICT_ANSI__ -mwin32
 # only windows versions after XP are supported
@@ -90,7 +90,7 @@ $(OBJROOT)/messages-en: $(MESSAGES_TARGET)/en/Messages
 	$(VQ)echo "   MSGCP: $< $@"
 	$(Q)$(INSTALL) -m 644 -T $< $@
 
-netsurf-installer.exe: $(EXETARGET) $(WIN_RES_INS_OBJ)
+netsurf-installer.exe: $(EXETARGET) $(POSTEXES) $(WIN_RES_INS_OBJ)
 	$(VQ)echo "MAKENSIS: $@"
 	$(Q)makensis -V$(NSIS_VERBOSE) -NOCD -DOBJROOT=$(OBJROOT) -DRESDIR=$(FRONTEND_RESOURCES_DIR) -DVERSIONMAJOR=$(VERSION_MAJ) -DVERSIONMINOR=$(VERSION_MIN) -DOUTFNAME=$@ $(FRONTEND_RESOURCES_DIR)/installer.nsi
 
