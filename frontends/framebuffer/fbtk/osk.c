@@ -237,7 +237,7 @@ void fbtk_enable_oskb(fbtk_widget_t *fbtk)
 	wh = (maxy * ww) / maxx;
 
 	osk = fbtk_create_window(
-		root, 0, fbtk_get_height(root) - wh, 0, wh, 0xff202020);
+		root, 0, fbtk_get_height(root) - wh, 0, wh, FB_COLOUR_WHITE);
 
 	for (kloop = 0; kloop < KEYCOUNT; kloop++) {
 		widget = fbtk_create_text_button(osk,
